@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Memory Manager Test</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #fff; padding: 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .panel { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .input-group { margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        input { padding: 8px; font-size: 14px; border: none; border-radius: 4px; background: #3c3c3c; color: white;}
+        button { padding: 8px 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #45a049; }
+        button.danger { background-color: #e53935; }
+        button.danger:hover { background-color: #d32f2f; }
+        .logBox { background: #111; padding: 15px; height: 250px; border-radius: 5px; font-family: 'Consolas', monospace; white-space: pre-wrap; font-size: 13px; overflow-y: auto; color: #a6e22e;}
+        .log-info { color: #4fc1ff; }
+        .log-warn { color: #ffcc00; }
+        .log-err { color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Shared Memory Manager (JS <-> C++)</h2>
+        
+        <div class="panel">
+            <div class="input-group">
+                <label>Size (Bytes):</label>
+                <input type="number" id="memSize" value="1024" style="width: 100px;">
+                <button id="btnCreate">Create Memory</button>
+            </div>
+            
+            <hr style="border-color: #444; margin: 15px 0;">
+            
+            <div class="input-group">
+                <label>Target ID:</label>
+                <input type="number" id="targetId" value="1" style="width: 100px;">
+                <button id="btnGet">Get Memory</button>
+                <button id="btnDestroy" class="danger">Destroy Memory</button>
+            </div>
+            
+            <hr style="border-color: #444; margin: 15px 0;">
+            
+            <div class="input-group">
+                <label>Write ID:</label>
+                <input type="number" id="writeId" value="1" style="width: 60px;">
+                <input type="text" id="writeContent" placeholder="Enter text to JS write..." style="flex: 1;">
+                <button id="btnWrite" style="background-color: #0288d1;">Write & Notify C++</button>
+            </div>
+        </div>
+
+        <div class="logBox" id="logBox">// System Log...</div>
+    </div>
+
+    <script>
+        const logBox = document.getElementById('logBox');
+        let mySharedBuffers = {}; // 存储当前 JS 侧持有的内存引用
+
+        function appendLog(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            let colorClass = 'log-info';
+            if(type === 'err') colorClass = 'log-err';
+            if(type === 'warn') colorClass = 'log-warn';
+            
+            logBox.innerHTML += `\n<span class="${colorClass}">[${time}] ${msg}</span>`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // ==========================================
+        // 1. 监听常规 Message 事件 (用于接收 ErrorReport 和 Destroy 成功反馈)
+        // ==========================================
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', function(event) {
+                const data = event.data;
+                if (data.action === "ErrorReport") {
+                    appendLog(`[Error] msgIndex: ${data.msgIndex || 'N/A'} - ${data.msg}`, 'err');
+                } else if (data.action === "DestroySharedMemory") {
+                    appendLog(`[Destroy] 成功销毁 C++ 侧内存 ID: ${data.id} (msgIndex: ${data.msgIndex})`, 'warn');
+                    
+                    // ⚠️ 特别注意：必须手动切断 JS 端的引用并释放引擎对象
+                    if (mySharedBuffers[data.id]) {
+                        window.chrome.webview.releaseBuffer(mySharedBuffers[data.id].buffer);
+                        delete mySharedBuffers[data.id];
+                        appendLog(`[Destroy] JS 侧内存视图与底层引擎句柄已释放.`, 'warn');
+                    }
+                }
+            });
+
+            // ==========================================
+            // 2. 监听特殊 SharedBufferReceived 事件 (用于接收 Create / Get / Update 推送)
+            // ==========================================
+            window.chrome.webview.addEventListener('sharedbufferreceived', function(event) {
+                // 核心修复：WebView2 引擎对 additionalData 的处理非常特殊
+                // 传过来的 event.additionalData 如果原本就是 JSON 格式，引擎在派发时可能已经把它当做对象处理了。
+                // 如果它是个字符串，我们就 parse；如果是对象，我们直接用！
+                let data;
+                try {
+                    data = typeof event.additionalData === 'string' 
+                            ? JSON.parse(event.additionalData) 
+                            : event.additionalData;
+                } catch (e) {
+                    appendLog(`[Error] 无法解析 SharedBuffer 的 additionalData: ${e}`, 'err');
+                    return;
+                }
+                
+                if (data.action === "CreateSharedMemory" || data.action === "GetSharedMemory") {
+                    appendLog(`[${data.action}] 成功获取内存! ID: ${data.id}, 大小: ${data.size} bytes (msgIndex: ${data.msgIndex})`);
+                    
+                    // 获取底层 ArrayBuffer
+                    const newBuffer = event.getBuffer();
+                    
+                    // 释放旧的 (如果是重叠情况)
+                    if (mySharedBuffers[data.id]) {
+                        window.chrome.webview.releaseBuffer(mySharedBuffers[data.id].buffer);
+                    }
+                    
+                    // 绑定新的
+                    mySharedBuffers[data.id] = {
+                        buffer: newBuffer,
+                        view: new Uint8Array(newBuffer)
+                    };
+                    
+                    appendLog(`--> JS 已成功绑定内存视图 view.length = ${mySharedBuffers[data.id].view.length}`);
+                } 
+                else if (data.action === "SharedMemoryUpdate") {
+                    // 读取 C++ 更新的数据
+                    if (mySharedBuffers[data.id]) {
+                        // 1. 如果带有 size，说明 C++ 进行了扩容重置，我们必须替换指针！
+                        if (data.size !== undefined) {
+                            appendLog(`[C++ -> JS 主动推送] 内存块 [ID: ${data.id}] 已重置/扩容，新大小: ${data.size}`, 'warn');
+                            window.chrome.webview.releaseBuffer(mySharedBuffers[data.id].buffer);
+                            
+                            const newBuffer = event.getBuffer();
+                            mySharedBuffers[data.id] = {
+                                buffer: newBuffer,
+                                view: new Uint8Array(newBuffer)
+                            };
+                            appendLog(`--> JS 自动绑定新的扩容内存完毕.`);
+                        }
+
+                        // 2. 将 C++ 传过来的字节数组解码成 String 展示
+                        const view = mySharedBuffers[data.id].view;
+                        let end = view.indexOf(0); // 找到 C 字符串的 \0 结尾
+                        if (end === -1) end = view.length;
+                        
+                        const decoder = new TextDecoder();
+                        const str = decoder.decode(view.slice(0, end));
+                        appendLog(`[C++ -> JS 更新内容] ID ${data.id}: "${str}"`, 'warn');
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // 3. 按钮交互发送命令到 C++ (由于 C++ 自动路由，无需额外绑定代码)
+        // ==========================================
+        document.getElementById('btnCreate').addEventListener('click', () => {
+            const size = parseInt(document.getElementById('memSize').value);
+            const req = { action: "CreateSharedMemory", msgIndex: "create-" + Date.now(), size: size };
+            appendLog(`发起请求: ${JSON.stringify(req)}`);
+            window.Shin.sendDataToCpp(req);
+        });
+
+        document.getElementById('btnGet').addEventListener('click', () => {
+            const id = parseInt(document.getElementById('targetId').value);
+            const req = { action: "GetSharedMemory", msgIndex: "get-" + Date.now(), id: id };
+            appendLog(`发起请求: ${JSON.stringify(req)}`);
+            window.Shin.sendDataToCpp(req);
+        });
+
+        document.getElementById('btnDestroy').addEventListener('click', () => {
+            const id = parseInt(document.getElementById('targetId').value);
+            const req = { action: "DestroySharedMemory", msgIndex: "destroy-" + Date.now(), id: id };
+            appendLog(`发起请求: ${JSON.stringify(req)}`);
+            window.Shin.sendDataToCpp(req);
+        });
+
+        document.getElementById('btnWrite').addEventListener('click', () => {
+            const id = parseInt(document.getElementById('writeId').value);
+            const content = document.getElementById('writeContent').value;
+            
+            if (mySharedBuffers[id]) {
+                const encoder = new TextEncoder();
+                const view = mySharedBuffers[id].view;
+                const encoded = encoder.encode(content);
+                
+                // 零拷贝写入，预留最后一位作为 \0
+                view.fill(0);
+                view.set(encoded.slice(0, view.length - 1)); 
+                
+                // 单向推送告知 C++
+                window.Shin.sendDataToCpp({ action: "SharedMemoryUpdate", id: id });
+                appendLog(`[JS -> C++] 写入并推送内容到 ID ${id}: ${content}`);
+            } else {
+                appendLog(`[Error] 尚未获取 ID ${id} 的共享内存！`, 'err');
+            }
+        });
+    </script>
+</body>
+</html>

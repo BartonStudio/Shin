@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auth & Webview Test</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background-color: #2d2d2d; padding: 40px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); text-align: center; width: 400px; }
+        h2 { margin-top: 0; color: #ffffff; }
+        p { color: #a0a0a0; font-size: 14px; margin-bottom: 30px; }
+        button { background-color: #0078d4; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; font-weight: bold; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        button:hover { background-color: #006abc; }
+        button:disabled { background-color: #555; cursor: not-allowed; color: #888; }
+        .status-box { margin-top: 25px; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 15px; display: none; border: 2px solid transparent; }
+        
+        /* 状态样式 */
+        .status-success { display: block; background-color: rgba(76, 175, 80, 0.1); color: #4CAF50; border-color: #4CAF50; }
+        .status-bypassed { display: block; background-color: rgba(255, 152, 0, 0.1); color: #FF9800; border-color: #FF9800; }
+        .status-failed { display: block; background-color: rgba(244, 67, 54, 0.1); color: #F44336; border-color: #F44336; }
+        .status-loading { display: block; background-color: rgba(255, 255, 255, 0.05); color: #fff; border-color: #888; }
+        
+        .spinner { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 3px solid #fff; width: 16px; height: 16px; animation: spin 1s linear infinite; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Security Verification</h2>
+        <p>This action requires system-level authentication (Windows Hello, PIN, or Fingerprint) to proceed.</p>
+        
+        <button id="authBtn">
+            <div class="spinner" id="spinner"></div>
+            <span id="btnText">Verify Identity</span>
+        </button>
+
+        <div id="statusBox" class="status-box">Waiting for action...</div>
+    </div>
+
+    <script>
+        const authBtn = document.getElementById('authBtn');
+        const spinner = document.getElementById('spinner');
+        const btnText = document.getElementById('btnText');
+        const statusBox = document.getElementById('statusBox');
+
+        function setStatus(className, message) {
+            statusBox.className = `status-box ${className}`;
+            statusBox.innerText = message;
+        }
+
+        function setLoading(isLoading) {
+            authBtn.disabled = isLoading;
+            spinner.style.display = isLoading ? 'block' : 'none';
+            btnText.innerText = isLoading ? 'Authenticating...' : 'Verify Identity';
+            if (isLoading) {
+                setStatus('status-loading', 'Waiting for system prompt...');
+            }
+        }
+
+        // 监听 C++ 的回调消息
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', function(event) {
+                const data = event.data;
+                
+                if (data.action === "AuthResponse") {
+                    setLoading(false);
+                    
+                    const result = data.result;
+                    if (result === "Success") {
+                        setStatus('status-success', '✅ Authentication Successful!');
+                    } else if (result === "Bypassed") {
+                        setStatus('status-bypassed', '⚠️ Auth Bypassed (Not Configured)');
+                    } else if (result === "Canceled") {
+                        setStatus('status-failed', '❌ Authentication Canceled by user');
+                    } else if (result === "Failed" || result === "Error") {
+                        setStatus('status-failed', `⛔ Authentication Failed (${result})`);
+                    } else if (result === "Unavailable") {
+                        setStatus('status-failed', '🚫 Windows Hello is unavailable on this device');
+                    }
+                } else if (data.action === "ErrorReport") {
+                    setLoading(false);
+                    setStatus('status-failed', `[System Error] ${data.msg}`);
+                }
+            });
+        }
+
+        // 触发认证
+        authBtn.addEventListener('click', () => {
+            setLoading(true);
+            const req = { 
+                action: "TriggerAuth", 
+                msgIndex: "auth-" + Date.now() 
+            };
+            
+            // 完美回归统一入口
+            if (window.Shin && window.Shin.sendDataToCpp) {
+                window.Shin.sendDataToCpp(req);
+            } else {
+                setLoading(false);
+                setStatus('status-failed', 'Error: Shin API not injected.');
+            }
+        });
+    </script>
+</body>
+</html>

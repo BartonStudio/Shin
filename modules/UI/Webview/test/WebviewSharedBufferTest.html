@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Buffer Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: #333333;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #4CAF50;
+        }
+        #bufferContent {
+            margin-top: 20px;
+            padding: 15px;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            min-width: 400px;
+            min-height: 100px;
+            word-wrap: break-word;
+            color: #4fc3f7;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebView2 Shared Buffer Test</h1>
+    <div class="status" id="status">Connecting to C++ backend...</div>
+    
+    <h3>Received Data (from C++ Memory):</h3>
+    <div id="bufferContent">No data yet.</div>
+
+    <script>
+        let sharedView = null;
+        let atomicLockView = null;
+
+        // 1. First, setup the listener for the Shared Buffer (Only happens ONCE)
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('sharedbufferreceived', function(event) {
+                console.log("Shared buffer linked!", event);
+                document.getElementById('status').innerText = "Shared Buffer Linked Successfully!";
+                document.getElementById('status').style.color = "#ffeb3b";
+
+                // Save the views globally!
+                const buffer = event.getBuffer();
+                
+                // Bytes 0-3 for Int32 Atomics lock, Bytes 4+ for actual data
+                atomicLockView = new Int32Array(buffer, 0, 1);
+                sharedView = new Uint8Array(buffer, 4);
+                
+                readAndDisplayMemory(event.additionalData);
+            });
+
+            // Listen for lightweight notification updates
+            window.chrome.webview.addEventListener('message', function(event) {
+                const data = event.data;
+                if (data && data.type === 'MemoryUpdated') {
+                    readAndDisplayMemory("{}"); // Re-read the same shared physical memory
+
+                    // Flash UI to show update
+                    const box = document.getElementById('bufferContent');
+                    box.style.borderColor = "#4CAF50";
+                    setTimeout(() => box.style.borderColor = "#555", 200);
+                }
+            });
+
+            // 2. Once the listener is ready, tell C++ to send the memory handle
+            window.addEventListener('DOMContentLoaded', () => {
+                if (window.requestSharedBuffer) {
+                    window.requestSharedBuffer("HTML is fully loaded and ready!")
+                        .then(res => console.log("C++ Acknowledged:", res))
+                        .catch(err => console.error("Error calling C++:", err));
+                }
+            });
+
+        } else {
+            document.getElementById('status').innerText = "WebView2 API not found. Are we running inside WebView2?";
+            document.getElementById('status').style.color = "#f44336";
+        }
+
+        function readAndDisplayMemory(additionalDataStr) {
+            if (!sharedView || !atomicLockView) return;
+            
+            let stringData = "";
+            let byteLen = sharedView.byteLength;
+
+            try {
+                // --- Acquire Lock (JS side) ---
+                // Try to set lock to 2 (JS reading), wait if it's 1 (C++ writing)
+                // Note: Atomics requires SharedArrayBuffer. If event.getBuffer() returned a normal ArrayBuffer, 
+                // this might throw a TypeError in some JS engines.
+                let spinCount = 0;
+                while (Atomics.compareExchange(atomicLockView, 0, 0, 2) !== 0) {
+                    spinCount++;
+                    if (spinCount > 100000) {
+                        console.warn("Spinlock timeout, forcing break to avoid UI freeze.");
+                        break;
+                    }
+                }
+                
+                // Read the bytes safely now that we hold the lock
+                let endStr = 0;
+                while (endStr < sharedView.length && sharedView[endStr] !== 0) {
+                    endStr++;
+                }
+                
+                const textDecoder = new TextDecoder('utf-8');
+                stringData = textDecoder.decode(sharedView.subarray(0, endStr));
+
+                // --- Release Lock ---
+                Atomics.store(atomicLockView, 0, 0);
+
+            } catch (err) {
+                // Fallback if Atomics is not supported on this buffer type
+                console.warn("Atomics error (falling back to unsynchronized read):", err);
+                let endStr = 0;
+                while (endStr < sharedView.length && sharedView[endStr] !== 0) endStr++;
+                const textDecoder = new TextDecoder('utf-8');
+                stringData = textDecoder.decode(sharedView.subarray(0, endStr));
+            }
+
+            let additionalData = {};
+            try {
+                if (additionalDataStr && additionalDataStr !== "{}") {
+                    additionalData = JSON.parse(additionalDataStr);
+                }
+            } catch (e) {}
+
+            document.getElementById('bufferContent').innerText = 
+`[Buffer Size] : ${byteLen} bytes (4 bytes reserved for lock)
+[Extra JSON]  : ${JSON.stringify(additionalData)}
+
+[Memory Data] : 
+${stringData}`;
+        }
+    </script>
+</body>
+</html>
