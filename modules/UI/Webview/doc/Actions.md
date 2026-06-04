@@ -18,6 +18,11 @@
 | **`CreateSharedMemory`** | JS | 请求 C++ 创建共享内存 | `{ "action": "CreateSharedMemory", "msgIndex": "req-123", "size": 1024 }` | `{ "action": "CreateSharedMemory", "msgIndex": "req-123", "id": 1, "size": 1024 }` | 不走普通 message。JS 必须监听 `sharedbufferreceived` 事件。通过 `event.getBuffer()` 获取共享内存底层的 `ArrayBuffer` 指针，而这个响应示例 JSON 存储在 `event.additionalData` 属性中。 |
 | **`DestroySharedMemory`** | JS | 请求 C++ 销毁指定共享内存 | `{ "action": "DestroySharedMemory", "id": 1 }` | `{ "action": "DestroySharedMemory", "id": 1 }` | 配合 `window.chrome.webview.releaseBuffer` 一起使用才能让系统彻底释放内存。 |
 | **`GetSharedMemory`** | JS | 请求 C++ 获取已存在的共享内存 | `{ "action": "GetSharedMemory", "msgIndex": "req-124", "id": 1 }` | `{ "action": "GetSharedMemory", "msgIndex": "req-124", "id": 1, "size": 1024 }` | 不走普通 message。JS 必须监听 `sharedbufferreceived` 事件。和创建类似，通过事件对象获取 `ArrayBuffer` 指针和 JSON 附加数据。 |
+| **`WindowMinimize`** | JS | 请求最小化宿主窗口 | `{ "action": "WindowMinimize" }` | 无响应 | 直接调用系统API最小化窗口 |
+| **`WindowToggleMaximize`** | JS | 请求切换窗口的最大化/还原状态 | `{ "action": "WindowToggleMaximize" }` | 无响应 | 如果已最大化则还原，否则最大化 |
+| **`WindowClose`** | JS | 请求关闭宿主窗口 | `{ "action": "WindowClose" }` | 无响应 | 发送 WM_CLOSE 消息关闭窗口 |
+| **`WindowOpenDevTools`** | JS | 请求唤出开发者工具控制台 | `{ "action": "WindowOpenDevTools" }` | 无响应 | WebView2 仅支持唤出控制台，无法主动关闭 |
+| **`WindowSetSize`** | JS | 动态设置窗口尺寸和缩放限制 | `{ "action": "WindowSetSize", "width": 800, "height": 600, "fixed": false }` | 无响应 | 支持设置窗口宽高及是否固定尺寸 |
 | **`SharedMemoryUpdate`** | 双向 | 单向主动通知。告知对方某块内存已更新（或扩容） | `{ "action": "SharedMemoryUpdate", "id": 1 }` (JS 发送不带 size) | `{ "action": "SharedMemoryUpdate", "id": 1, "size": 2048 }` (C++ 推送) | 这是单向通知，不要求回应（Ack）。C++ 发送时会附带新的内存句柄，前端需读取并更新；JS 发送时仅表示内容已更新。 |
 
 ---
@@ -173,3 +178,53 @@ window.Shin.sendDataToCpp({ action: "SharedMemoryUpdate", id: 1 });
 | :--- | :--- | :--- |
 | `action` | String | 固定为 `"SharedMemoryUpdate"` |
 | `id` | Number | 被修改的共享内存块 ID |
+
+### 3.5 窗口管理 (Window Management)
+
+前端控制宿主窗口状态的相关接口。这些接口均为单向请求，执行后系统没有默认的回调响应。
+
+#### 3.5.1 WindowMinimize
+最小化当前宿主窗口。
+
+**请求字段:**
+| 字段名 | 数据类型 | 必填 | 说明 |
+| :--- | :--- | :---: | :--- |
+| `action` | String | **是** | 固定为 `"WindowMinimize"` |
+
+#### 3.5.2 WindowToggleMaximize
+切换当前宿主窗口的最大化/还原状态。如果当前为常规窗口，则最大化；如果已经最大化，则还原。
+
+**请求字段:**
+| 字段名 | 数据类型 | 必填 | 说明 |
+| :--- | :--- | :---: | :--- |
+| `action` | String | **是** | 固定为 `"WindowToggleMaximize"` |
+
+#### 3.5.3 WindowClose
+关闭当前宿主窗口。这会向主窗口发送关闭消息并结束进程。
+
+**请求字段:**
+| 字段名 | 数据类型 | 必填 | 说明 |
+| :--- | :--- | :---: | :--- |
+| `action` | String | **是** | 固定为 `"WindowClose"` |
+
+#### 3.5.4 WindowOpenDevTools
+唤出当前 WebView 的开发者工具控制台（DevTools）。
+
+> **⚠️ 注意：**
+> WebView2 官方 C++ API 仅提供了 `OpenDevToolsWindow` 方法，因此只能唤出和聚焦控制台，无法通过程序接口主动关闭已经打开的控制台窗口。
+
+**请求字段:**
+| 字段名 | 数据类型 | 必填 | 说明 |
+| :--- | :--- | :---: | :--- |
+| `action` | String | **是** | 固定为 `"WindowOpenDevTools"` |
+
+#### 3.5.5 WindowSetSize
+动态设置宿主窗口的尺寸，并可选地设置是否允许用户手动调整大小。
+
+**请求字段:**
+| 字段名 | 数据类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :---: | :--- | :--- |
+| `action` | String | **是** | - | 动作标识，固定为 `"WindowSetSize"` |
+| `width` | Number | **是** | - | 窗口的目标宽度（像素） |
+| `height` | Number | **是** | - | 窗口的目标高度（像素） |
+| `fixed` | Boolean | *否* | `false` | 是否固定窗口尺寸。为 `true` 时用户无法拖拽边缘缩放窗口。 |

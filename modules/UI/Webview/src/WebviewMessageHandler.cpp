@@ -4,6 +4,14 @@
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <functional>
+#include <thread>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+
+#include <windows.h>
+#include <WebView2.h>
+#include <wrl.h>
 
 namespace Shin {
 namespace UI {
@@ -12,9 +20,57 @@ namespace WebviewMessageHandler {
     std::string ProcessMessage(const std::string& jsonRequest);
 
     namespace {
-        using ActionHandler = std::function<void(const nlohmann::json&, nlohmann::json&, WebviewWrapper&)>;
-        
-        // 专门存放 SharedMemoryUpdate 的观察者列表
+        class SimpleThreadPool {
+        public:
+            SimpleThreadPool(size_t threads = 4) : stop(false) {
+                for (size_t i = 0; i < threads; ++i) {
+                    workers.emplace_back([this] {
+                        for (;;) {
+                            std::function<void()> task;
+                            {
+                                std::unique_lock<std::mutex> lock(this->queue_mutex);
+                                this->condition.wait(lock, [this] { return this->stop || !this->tasks.empty(); });
+                                if (this->stop && this->tasks.empty()) return;
+                                task = std::move(this->tasks.front());
+                                this->tasks.pop();
+                            }
+                            task();
+                        }
+                    });
+                }
+            }
+            ~SimpleThreadPool() {
+                {
+                    std::unique_lock<std::mutex> lock(queue_mutex);
+                    stop = true;
+                }
+                condition.notify_all();
+                for (std::thread &worker : workers) {
+                    worker.join();
+                }
+            }
+            template<class F> void enqueue(F&& f) {
+                {
+                    std::unique_lock<std::mutex> lock(queue_mutex);
+                    tasks.emplace(std::forward<F>(f));
+                }
+                condition.notify_one();
+            }
+        private:
+            std::vector<std::thread> workers;
+            std::queue<std::function<void()>> tasks;
+            std::mutex queue_mutex;
+            std::condition_variable condition;
+            bool stop;
+        };
+
+        SimpleThreadPool s_threadPool(4);
+
+        struct ActionDef {
+            ActionHandler handler;
+            bool runInBackground;
+        };
+
         std::vector<SharedMemoryUpdateObserver> s_updateObservers;
 
         bool TryParseRequest(const std::string& raw, nlohmann::json& outJson, WebviewWrapper& webview) {
@@ -32,126 +88,179 @@ namespace WebviewMessageHandler {
             }
         }
 
-        void HandleCreateSharedMemory(const nlohmann::json& req, nlohmann::json& res, WebviewWrapper& webview) {
-            Shin::LOGI("WebviewMessageHandler") << "Handling CreateSharedMemory...";
-            
+        void HandleCreateSharedMemory(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
             if (!req.contains("size") || !req["size"].is_number_integer()) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "CreateSharedMemory 请求参数错误，必须包含整型的 'size'";
-                webview.SendJson(res.dump());
+                sendResponse(res);
                 return;
             }
 
             size_t size = req["size"].get<size_t>();
-
             int id = -1;
-            void* ptr = webview.CreateSharedMemory(id, size);
+            void* ptr = WebviewWrapper::GetInstance().CreateSharedMemory(id, size);
+            
             if (!ptr || id == -1) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "创建共享内存失败 (size: " + std::to_string(size) + ")";
-                webview.SendJson(res.dump());
+                sendResponse(res);
                 return;
             }
 
             res["id"] = id;
             res["size"] = size;
 
-            bool postOk = webview.PostSharedMemoryToWeb(id, res.dump());
+            bool postOk = WebviewWrapper::GetInstance().PostSharedMemoryToWeb(id, res.dump());
             if (!postOk) {
                 res.erase("id");
                 res.erase("size");
                 res["action"] = "ErrorReport";
                 res["msg"] = "发送共享内存句柄给前端失败 (PostSharedMemoryToWeb failed)";
-                webview.SendJson(res.dump());
+                sendResponse(res);
             }
         }
 
-        void HandleDestroySharedMemory(const nlohmann::json& req, nlohmann::json& res, WebviewWrapper& webview) {
-            Shin::LOGI("WebviewMessageHandler") << "Handling DestroySharedMemory...";
-
+        void HandleDestroySharedMemory(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
             if (!req.contains("id") || !req["id"].is_number_integer()) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "DestroySharedMemory 请求参数错误，必须包含整型的 'id'";
-                webview.SendJson(res.dump());
+                sendResponse(res);
                 return;
             }
 
             int id = req["id"].get<int>();
-            
-            if (webview.DestroySharedMemory(id)) {
+            if (WebviewWrapper::GetInstance().DestroySharedMemory(id)) {
                 res["id"] = id;
-                webview.SendJson(res.dump());
+                sendResponse(res);
             } else {
                 res["action"] = "ErrorReport";
                 res["msg"] = "销毁共享内存失败，指定的 id 不存在或已被销毁: " + std::to_string(id);
-                webview.SendJson(res.dump());
+                sendResponse(res);
             }
         }
 
-        void HandleGetSharedMemory(const nlohmann::json& req, nlohmann::json& res, WebviewWrapper& webview) {
-            Shin::LOGI("WebviewMessageHandler") << "Handling GetSharedMemory...";
-
+        void HandleGetSharedMemory(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
             if (!req.contains("id") || !req["id"].is_number_integer()) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "GetSharedMemory 请求参数错误，必须包含整型的 'id'";
-                webview.SendJson(res.dump());
+                sendResponse(res);
                 return;
             }
 
             int id = req["id"].get<int>();
-            size_t size = webview.GetSharedMemorySize(id);
+            size_t size = WebviewWrapper::GetInstance().GetSharedMemorySize(id);
 
             if (size == 0) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "获取共享内存失败，指定的 id 不存在: " + std::to_string(id);
-                webview.SendJson(res.dump());
+                sendResponse(res);
                 return;
             }
 
             res["id"] = id;
             res["size"] = size;
 
-            bool postOk = webview.PostSharedMemoryToWeb(id, res.dump());
+            bool postOk = WebviewWrapper::GetInstance().PostSharedMemoryToWeb(id, res.dump());
             if (!postOk) {
                 res.erase("id");
                 res.erase("size");
                 res["action"] = "ErrorReport";
                 res["msg"] = "发送共享内存句柄给前端失败 (PostSharedMemoryToWeb failed)";
-                webview.SendJson(res.dump());
+                sendResponse(res);
             }
         }
 
-        void HandleSharedMemoryUpdate(const nlohmann::json& req, nlohmann::json& res, WebviewWrapper& webview) {
+        void HandleSharedMemoryUpdate(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
             if (!req.contains("id") || !req["id"].is_number_integer()) return;
             int id = req["id"].get<int>();
             
-            void* ptr = webview.GetSharedMemory(id);
+            void* ptr = WebviewWrapper::GetInstance().GetSharedMemory(id);
             if (ptr) {
-                // 通知所有注册的业务模块
                 if (!s_updateObservers.empty()) {
                     for (const auto& observer : s_updateObservers) {
                         observer(id);
                     }
                 } else {
-                    // 如果没有外部监听者，默认打个日志
-                    size_t size = webview.GetSharedMemorySize(id);
+                    size_t size = WebviewWrapper::GetInstance().GetSharedMemorySize(id);
                     std::string content(static_cast<const char*>(ptr), strnlen(static_cast<const char*>(ptr), size));
                     Shin::LOGI("WebviewMessageHandler") << "[JS -> C++] 收到前端主动推送，ID " << id << " 内容已更新: " << content;
                 }
             }
         }
 
-        static std::unordered_map<std::string, ActionHandler> s_actionHandlers = {
-            { "CreateSharedMemory", HandleCreateSharedMemory },
-            { "DestroySharedMemory", HandleDestroySharedMemory },
-            { "GetSharedMemory", HandleGetSharedMemory },
-            { "SharedMemoryUpdate", HandleSharedMemoryUpdate }
+        void HandleWindowMinimize(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            HWND hwnd = (HWND)WebviewWrapper::GetInstance().GetNativeWindow();
+            if (hwnd) {
+                PostMessage(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+            }
+        }
+
+        void HandleWindowDrag(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            HWND hwnd = (HWND)WebviewWrapper::GetInstance().GetNativeWindow();
+            if (hwnd) {
+                ReleaseCapture();
+                SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            }
+        }
+
+        void HandleWindowToggleMaximize(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            HWND hwnd = (HWND)WebviewWrapper::GetInstance().GetNativeWindow();
+            if (hwnd) {
+                if (IsZoomed(hwnd)) {
+                    PostMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+                } else {
+                    PostMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+                }
+            }
+        }
+
+        void HandleWindowClose(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            HWND hwnd = (HWND)WebviewWrapper::GetInstance().GetNativeWindow();
+            if (hwnd) {
+                PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+            }
+        }
+
+        void HandleWindowOpenDevTools(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            auto controller = (ICoreWebView2Controller*)WebviewWrapper::GetInstance().GetNativeController();
+            if (controller) {
+                Microsoft::WRL::ComPtr<ICoreWebView2> wv2;
+                if (SUCCEEDED(controller->get_CoreWebView2(&wv2))) {
+                    wv2->OpenDevToolsWindow();
+                }
+            }
+        }
+
+        void HandleWindowSetSize(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            if (!req.contains("width") || !req["width"].is_number_integer() ||
+                !req.contains("height") || !req["height"].is_number_integer()) {
+                return;
+            }
+
+            int width = req["width"].get<int>();
+            int height = req["height"].get<int>();
+            bool fixed = req.value("fixed", false);
+
+            WebviewWrapper::GetInstance().SetSize(width, height, fixed);
+        }
+
+        static std::unordered_map<std::string, ActionDef> s_actionHandlers = {
+            { "CreateSharedMemory", { HandleCreateSharedMemory, false } },
+            { "DestroySharedMemory", { HandleDestroySharedMemory, false } },
+            { "GetSharedMemory", { HandleGetSharedMemory, false } },
+            { "SharedMemoryUpdate", { HandleSharedMemoryUpdate, false } },
+            { "WindowMinimize", { HandleWindowMinimize, false } },
+            { "WindowDrag", { HandleWindowDrag, false } },
+            { "WindowToggleMaximize", { HandleWindowToggleMaximize, false } },
+            { "WindowClose", { HandleWindowClose, false } },
+            { "WindowOpenDevTools", { HandleWindowOpenDevTools, false } },
+            { "WindowSetSize", { HandleWindowSetSize, false } }
         };
     }
 
-    void RegisterAction(const std::string& actionName, ActionHandler handler) {
-        s_actionHandlers[actionName] = handler;
-        Shin::LOGI("WebviewMessageHandler") << "Registered new custom action handler: " << actionName;
+    void RegisterAction(const std::string& actionName, ActionHandler handler, bool runInBackground) {
+        s_actionHandlers[actionName] = { handler, runInBackground };
+        Shin::LOGI("WebviewMessageHandler") << "Registered new custom action handler: " << actionName << " (background=" << runInBackground << ")";
     }
 
     std::string ProcessMessage(const std::string& jsonRequest) {
@@ -164,13 +273,10 @@ namespace WebviewMessageHandler {
             return "{}";
         }
 
-        // 核心修复：剥离 WebView 引擎强制附加的外层数组包装
-        // JS 传过来的参数会被包装成 ["arg1", "arg2"], 这里我们提取真正的业务对象 arg1
         if (parsedJson.is_array() && !parsedJson.empty()) {
             parsedJson = parsedJson[0];
         }
 
-        // 应对极端情况：剥开数组后，如果里面包的不是对象，而是个字符串（比如 JS 传参数时手贱用了 JSON.stringify()）
         if (parsedJson.is_string()) {
             try {
                 parsedJson = nlohmann::json::parse(parsedJson.get<std::string>());
@@ -190,21 +296,38 @@ namespace WebviewMessageHandler {
         }
 
         std::string action = parsedJson["action"].get<std::string>();
-        
-        nlohmann::json resBase = nlohmann::json::object();
-        resBase["action"] = action;
-        if (parsedJson.contains("msgIndex")) {
-            resBase["msgIndex"] = parsedJson["msgIndex"];
-        }
+        std::string msgIndex = parsedJson.value("msgIndex", "");
 
         auto it = s_actionHandlers.find(action);
         if (it != s_actionHandlers.end()) {
-            it->second(parsedJson, resBase, webview);
-            // 如果业务层没有清空 resBase（说明它想要网关代为回复）
-            // 注意：目前我们在底层业务如 CreateSharedMemory 也是自己调用 webview 方法回复的
-            // 所以这里什么都不用做
+            ResponseCallback sendResponse = [action, msgIndex](const nlohmann::json& responseData) {
+                nlohmann::json resBase = responseData;
+                // 如果业务侧自己指定了 action (如 AuthResponse)，就不覆盖；否则默认使用原请求的 action
+                if (!resBase.contains("action")) {
+                    resBase["action"] = action;
+                }
+                if (!msgIndex.empty() && !resBase.contains("msgIndex")) {
+                    resBase["msgIndex"] = msgIndex;
+                }
+                // 安全获取实例并发送
+                WebviewWrapper::GetInstance().SendJson(resBase.dump());
+            };
+
+            nlohmann::json initialRes;
+            initialRes["action"] = action;
+            if (!msgIndex.empty()) initialRes["msgIndex"] = msgIndex;
+
+            if (it->second.runInBackground) {
+                s_threadPool.enqueue([handler = it->second.handler, req = parsedJson, res = initialRes, sendResponse]() {
+                    handler(req, res, sendResponse);
+                });
+            } else {
+                it->second.handler(parsedJson, initialRes, sendResponse);
+            }
         } else {
+            nlohmann::json resBase;
             resBase["action"] = "ErrorReport";
+            if (!msgIndex.empty()) resBase["msgIndex"] = msgIndex;
             resBase["msg"] = "未知的业务类型 (Unknown Action): " + action;
             webview.SendJson(resBase.dump());
         }

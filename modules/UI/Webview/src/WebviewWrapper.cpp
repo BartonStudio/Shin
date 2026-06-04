@@ -13,8 +13,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <windowsx.h>
+#include <commctrl.h>
 #include <WebView2.h>
 #include <wrl.h>
+#pragma comment(lib, "comctl32.lib")
 #endif
 
 // 声明内部链接的 ProcessMessage
@@ -26,6 +29,126 @@ namespace WebviewMessageHandler {
 }
 }
 
+#ifdef _WIN32
+namespace {
+    // 转发声明
+    LRESULT CALLBACK HostSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
+    LRESULT CALLBACK ChildSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
+    BOOL CALLBACK EnumChildProc(HWND hWnd, LPARAM lParam);
+
+    LRESULT CALLBACK HostSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        switch (uMsg) {
+        case WM_NCCALCSIZE: {
+            if (wParam) {
+                // 如果是无边框模式，我们告诉系统客户区覆盖整个窗口
+                DWORD style = GetWindowLongPtr(hWnd, GWL_STYLE);
+                if (!(style & WS_CAPTION)) {
+                    if (IsZoomed(hWnd)) {
+                        // 最大化时需要留出边距，否则内容会超出屏幕或覆盖任务栏
+                        LPNCCALCSIZE_PARAMS pncsp = reinterpret_cast<LPNCCALCSIZE_PARAMS>(lParam);
+                        int border = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                        pncsp->rgrc[0].top += border;
+                        pncsp->rgrc[0].left += border;
+                        pncsp->rgrc[0].right -= border;
+                        pncsp->rgrc[0].bottom -= border;
+                    }
+                    return 0;
+                }
+            }
+            break;
+        }
+        case WM_NCHITTEST: {
+            // 先尝试系统的默认逻辑（这会处理滚动条等）
+            LRESULT hit = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            
+            DWORD style = GetWindowLongPtr(hWnd, GWL_STYLE);
+            // 只有无边框且非最大化时，才执行自定义边缘探测
+            if (!(style & WS_CAPTION) && (style & WS_THICKFRAME) && !IsZoomed(hWnd)) {
+                POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                RECT rc;
+                GetWindowRect(hWnd, &rc);
+                
+                const int span = 10; // 足够大的探测范围
+
+                bool left = (pt.x < rc.left + span);
+                bool right = (pt.x >= rc.right - span);
+                bool top = (pt.y < rc.top + span);
+                bool bottom = (pt.y >= rc.bottom - span);
+
+                if (top && left) return HTTOPLEFT;
+                if (top && right) return HTTOPRIGHT;
+                if (bottom && left) return HTBOTTOMLEFT;
+                if (bottom && right) return HTBOTTOMRIGHT;
+                if (top) return HTTOP;
+                if (bottom) return HTBOTTOM;
+                if (left) return HTLEFT;
+                if (right) return HTRIGHT;
+            }
+            return hit;
+        }
+        case WM_SIZE:
+        case WM_SHOWWINDOW: {
+            EnumChildWindows(hWnd, EnumChildProc, (LPARAM)hWnd);
+            break;
+        }
+        case WM_GETMINMAXINFO: {
+            // 确保最大化时不会遮挡任务栏
+            MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+            HMONITOR monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor) {
+                MONITORINFO mi = { sizeof(mi) };
+                if (GetMonitorInfo(monitor, &mi)) {
+                    mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left;
+                    mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
+                    mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
+                    mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
+                }
+            }
+            return 0;
+        }
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    LRESULT CALLBACK ChildSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        if (uMsg == WM_NCHITTEST) {
+            HWND hostHwnd = (HWND)dwRefData;
+            DWORD style = GetWindowLongPtr(hostHwnd, GWL_STYLE);
+
+            if (!(style & WS_CAPTION) && (style & WS_THICKFRAME) && !IsZoomed(hostHwnd)) {
+                POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                RECT rc;
+                GetWindowRect(hostHwnd, &rc);
+                
+                const int span = 10;
+                // 检查鼠标是否在宿主窗口的边缘
+                if (pt.x < rc.left + span || pt.x >= rc.right - span ||
+                    pt.y < rc.top + span || pt.y >= rc.bottom - span) {
+                    // 让消息穿透到宿主窗口
+                    return HTTRANSPARENT;
+                }
+            }
+        } else if (uMsg == WM_NCDESTROY) {
+            RemoveWindowSubclass(hWnd, ChildSubclassProc, uIdSubclass);
+            RemovePropW(hWnd, L"ShinSubclassed");
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    BOOL CALLBACK EnumChildProc(HWND hWnd, LPARAM lParam) {
+        // 检查是否已经子类化过
+        if (!GetPropW(hWnd, L"ShinSubclassed")) {
+            SetWindowSubclass(hWnd, ChildSubclassProc, 2, lParam);
+            SetPropW(hWnd, L"ShinSubclassed", (HANDLE)1);
+            
+            // 继续向下递归枚举子窗口的子窗口
+            EnumChildWindows(hWnd, EnumChildProc, lParam);
+        }
+        return TRUE;
+    }
+}
+#endif
+
 namespace Shin {
 namespace UI {
 
@@ -34,6 +157,7 @@ namespace UI {
         void* parentWindow = nullptr;
         std::string startupUrl;
         std::string startupHtml;
+        bool contextMenuEnabled = false;
         std::string title = "Shin UI";
         int width = 800;
         int height = 600;
@@ -100,6 +224,24 @@ namespace UI {
         if (!m_impl->isInitialized) m_impl->jsCallback = callback;
     }
 
+    void WebviewWrapper::SetContextMenuEnabled(bool enable) {
+        m_impl->contextMenuEnabled = enable;
+        if (m_impl->w) {
+#ifdef _WIN32
+            auto controller = (ICoreWebView2Controller*)GetNativeController();
+            if (controller) {
+                Microsoft::WRL::ComPtr<ICoreWebView2> wv2;
+                if (SUCCEEDED(controller->get_CoreWebView2(&wv2))) {
+                    Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
+                    if (SUCCEEDED(wv2->get_Settings(&settings))) {
+                        settings->put_AreDefaultContextMenusEnabled(enable);
+                    }
+                }
+            }
+#endif
+        }
+    }
+
     void WebviewWrapper::InjectJSBeforeLoad(const std::string& js) {
         if (!m_impl->isInitialized) m_impl->initScripts.push_back(js);
     }
@@ -150,6 +292,9 @@ namespace UI {
             m_impl->w->set_title(m_impl->title);
             m_impl->w->set_size(m_impl->width, m_impl->height, static_cast<webview_hint_t>(m_impl->hints));
 
+            // Apply Context Menu settings
+            SetContextMenuEnabled(m_impl->contextMenuEnabled);
+
             for (const auto& js : m_impl->initScripts) {
                 m_impl->w->init(js);
             }
@@ -192,6 +337,19 @@ namespace UI {
             }
 
             m_impl->isInitialized = true;
+
+#ifdef _WIN32
+            HWND hostHwnd = (HWND)GetNativeWindow();
+            if (hostHwnd) {
+                // 1. 宿主窗口子类化：处理边缘碰撞检测
+                SetWindowSubclass(hostHwnd, HostSubclassProc, 1, 0);
+                
+                // 2. 子窗口枚举并子类化：让 WebView2 的边缘消息穿透到宿主
+                // 稍微延迟一下确保 WebView2 子窗口已创建（可选，这里先同步尝试）
+                EnumChildWindows(hostHwnd, EnumChildProc, (LPARAM)hostHwnd);
+            }
+#endif
+
             return true;
         } catch (...) {
             return false;
@@ -199,7 +357,7 @@ namespace UI {
     }
 
     void* WebviewWrapper::GetNativeWindow() {
-        if (m_impl->isInitialized && m_impl->w) {
+        if (m_impl->w) {
             auto res = m_impl->w->window();
             if (res.ok()) return res.value();
         }
@@ -207,7 +365,7 @@ namespace UI {
     }
 
     void* WebviewWrapper::GetNativeController() {
-        if (m_impl->isInitialized && m_impl->w) {
+        if (m_impl->w) {
             auto res = m_impl->w->browser_controller();
             if (res.ok()) return res.value();
         }

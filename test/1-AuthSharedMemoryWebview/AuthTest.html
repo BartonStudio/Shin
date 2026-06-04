@@ -62,7 +62,7 @@
             window.chrome.webview.addEventListener('message', function(event) {
                 const data = event.data;
                 
-                if (data.action === "AuthResponse") {
+                if (data.action === "TriggerAuth") {
                     setLoading(false);
                     
                     const result = data.result;

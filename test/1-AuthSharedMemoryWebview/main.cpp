@@ -41,42 +41,22 @@ int main() {
     // 动态路由注册机制：外部业务接入
     // 告别底层的 BindFunction！直接向系统注册 Action 处理回调。
     // ==========================================
-    Shin::UI::WebviewMessageHandler::RegisterAction("TriggerAuth", [&webview](const nlohmann::json& req, nlohmann::json& res, Shin::UI::WebviewWrapper& wv) {
+    Shin::UI::WebviewMessageHandler::RegisterAction("TriggerAuth", [](const nlohmann::json& req, nlohmann::json res, Shin::UI::WebviewMessageHandler::ResponseCallback sendResponse) {
         Shin::LOGI("BusinessLayer") << "Received TriggerAuth request from JS.";
 
-        std::string msgIndex = req.contains("msgIndex") ? req["msgIndex"].get<std::string>() : "";
+        Shin::System::AuthOptions options;
+        options.promptMessage = L"Please verify your identity for Shin Security Test.";
+        options.allowBypassIfUnconfigured = true;
+        
+        options.parentWindowHandle = static_cast<HWND>(Shin::UI::WebviewWrapper::GetInstance().GetNativeWindow());
 
-        // 解法：利用 std::thread 开一个独立的后台线程，在这个线程里强制重新初始化 WinRT 的 MTA 套间
-        std::thread([&webview, msgIndex]() {
-            Shin::System::AuthOptions options;
-            options.promptMessage = L"Please verify your identity for Shin Security Test.";
-            options.allowBypassIfUnconfigured = true;
-            // 注意：跨线程调用 GetNativeWindow 获取 HWND 是安全的
-            options.parentWindowHandle = static_cast<HWND>(webview.GetNativeWindow());
+        auto authResult = Shin::System::LocalAuthenticator::VerifyUser(options);
+        std::string resultStr = AuthResultToString(authResult);
 
-            // 调用原生认证
-            auto authResult = Shin::System::LocalAuthenticator::VerifyUser(options);
-            std::string resultStr = AuthResultToString(authResult);
+        Shin::LOGI("BusinessLayer") << "Auth result: " << resultStr;
 
-            Shin::LOGI("BusinessLayer") << "Auth result: " << resultStr;
-
-            // 构造响应 JSON
-            nlohmann::json threadRes = {
-                {"action", "AuthResponse"},
-                {"result", resultStr}
-            };
-            if (!msgIndex.empty()) {
-                threadRes["msgIndex"] = msgIndex;
-            }
-
-            // 跨线程安全地推送回前端
-            webview.SendJson(threadRes.dump());
-        }).detach();
-
-        // 由于上面开了子线程异步处理并自行发送了 AuthResponse
-        // 当前这个回调直接让它走完即可。因为这是一个特殊的 RPC，
-        // 为了防止底层自动发一条空结果回去覆盖前端状态，我们清空 action 不让底层路由回复它
-        res.clear();
+        res["result"] = resultStr;
+        sendResponse(res);
     });
 
     auto htmlPath = GetExecutableDir() / "AuthTest.html";

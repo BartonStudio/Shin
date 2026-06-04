@@ -1,6 +1,7 @@
 add_library(UIWebview SHARED 
     src/WebviewWrapper.cpp 
     src/WebviewMessageHandler.cpp
+    src/WebviewModule.cpp
 )
 set_target_properties(UIWebview PROPERTIES FOLDER "Modules/UI")
 

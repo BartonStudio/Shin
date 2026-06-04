@@ -2,37 +2,191 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shin UI Application</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Shin Application</title>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1e1e1e;
-            color: #ffffff;
+        body { margin: 0; font-family: sans-serif; background: #1e1e1e; color: #fff; }
+        
+        /* Title Bar */
+        #title-bar {
+            height: 32px;
+            background: #333;
             display: flex;
-            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px;
+            cursor: default;
+            user-select: none;
+        }
+        
+        #title { font-size: 14px; font-weight: bold; }
+        
+        .btn {
+            background: none;
+            border: none;
+            color: #fff;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .btn:hover { background: #555; }
+        
+        #content { padding: 20px; }
+
+        .control-group {
+            margin-bottom: 15px;
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .control-group label { display: block; margin-bottom: 5px; color: #aaa; }
+        .input-row { display: flex; gap: 10px; align-items: center; }
+        input[type="number"] {
+            background: #444;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            width: 80px;
+        }
+        .apply-btn {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .apply-btn:hover { background: #0062a3; }
+
+        /* Floating DevTools Button */
+        #dev-tools-fab {
+            position: fixed;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 4px 0 0 4px;
+            cursor: pointer;
+            z-index: 9999;
+            transition: width 0.2s, background 0.2s;
+            display: flex;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            overflow: hidden;
+            color: transparent;
+            font-size: 10px;
+            white-space: nowrap;
         }
-        h1 {
-            font-weight: 300;
-            letter-spacing: 2px;
+        #dev-tools-fab:hover {
+            width: 40px;
+            background: rgba(0, 122, 204, 0.8);
+            color: white;
         }
-        .status {
-            margin-top: 20px;
-            padding: 10px 20px;
-            background: #333333;
-            border-radius: 6px;
-            font-size: 14px;
-            color: #4CAF50;
+        #dev-tools-fab::after {
+            content: "F12";
         }
     </style>
 </head>
 <body>
-    <h1>Shin UI Engine</h1>
-    <div class="status">Frontend resources are ready.</div>
+    <!-- Floating DevTools Trigger -->
+    <button id="dev-tools-fab" title="Open DevTools" onclick="sendAction(event, 'WindowOpenDevTools')"></button>
+
+    <div id="title-bar" onmousedown="onMouseDown(event)" onmousemove="onMouseMove(event)" onmouseup="onMouseUp()" ondblclick="toggleMaximize()">
+        <div id="title">Shin Application</div>
+        <div id="controls">
+            <button class="btn" onclick="sendAction(event, 'WindowMinimize')">─</button>
+            <button class="btn" onclick="sendAction(event, 'WindowToggleMaximize')">□</button>
+            <button class="btn" onclick="sendAction(event, 'WindowClose')" style="color: #ff5f56;">✕</button>
+        </div>
+    </div>
+    
+    <div id="content">
+        <h1>Welcome to Shin</h1>
+        <p>This is the frontend UI.</p>
+
+        <div class="control-group">
+            <label>Window Size Settings</label>
+            <div class="input-row">
+                <input type="number" id="win-width" placeholder="Width" value="800">
+                <span>x</span>
+                <input type="number" id="win-height" placeholder="Height" value="600">
+                <button class="apply-btn" onclick="applySize()">Apply Size</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isDragging = false;
+        let isMouseDown = false;
+        let startX, startY;
+
+        function onMouseDown(e) {
+            if (e.target.id !== 'title-bar' && e.target.id !== 'title') return;
+            isMouseDown = true;
+            startX = e.clientX;
+            startY = e.clientY;
+        }
+
+        function applySize() {
+            const width = parseInt(document.getElementById('win-width').value);
+            const height = parseInt(document.getElementById('win-height').value);
+            
+            if (isNaN(width) || isNaN(height)) {
+                alert("Please enter valid numbers for width and height");
+                return;
+            }
+
+            if (window.Shin && window.Shin.sendDataToCpp) {
+                window.Shin.sendDataToCpp({
+                    action: 'WindowSetSize',
+                    width: width,
+                    height: height,
+                    fixed: false
+                });
+            }
+        }
+
+        function onMouseMove(e) {
+            if (!isMouseDown) return;
+            // 如果移动超过 5 像素，则触发原生拖拽
+            if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
+                isDragging = true;
+                if (window.Shin && window.Shin.sendDataToCpp) {
+                    window.Shin.sendDataToCpp({ action: 'WindowDrag' });
+                }
+                isMouseDown = false;
+            }
+        }
+
+        function onMouseUp() {
+            isMouseDown = false;
+        }
+
+        // Toggle maximize
+        function toggleMaximize() {
+            isMouseDown = false; // 取消拖拽状态
+            if (window.Shin && window.Shin.sendDataToCpp) {
+                window.Shin.sendDataToCpp({ action: 'WindowToggleMaximize' });
+            }
+        }
+
+        async function sendAction(e, action) {
+            e.stopPropagation();
+            e.preventDefault();
+
+            if (window.Shin && window.Shin.sendDataToCpp) {
+                try {
+                    await window.Shin.sendDataToCpp({ action: action });
+                } catch (err) {
+                    console.error("Failed to send action to C++:", err);
+                }
+            }
+        }
+    </script>
 </body>
 </html>

@@ -36,6 +36,8 @@ namespace UI {
         void SetStartupURL(const std::string& url);
         void SetStartupHTML(const std::string& html);
 
+        void SetContextMenuEnabled(bool enable);
+
         // Business Layer callback
         void SetJavascriptMessageCallback(std::function<std::string(const std::string&)> callback);
 

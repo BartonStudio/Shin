@@ -8,8 +8,29 @@ int main() {
     // Initialize the logger
     Shin::Log::Init();
 
+    // Test Callback Sink
+    bool callbackCalled = false;
+    Shin::Log::AddCallbackSink([&](Shin::LogLevel level, const char* tag, const char* msg) {
+        callbackCalled = true;
+        printf("--- Callback Received: [%s] %s ---\n", tag, msg);
+    });
+
+    // Test JSON Callback Sink
+    Shin::Log::AddJsonCallbackSink([](const std::string& jsonMsg, const Shin::Log::LogEntry& entry) {
+        printf("--- JSON Received ---\n%s\n---------------------\n", jsonMsg.c_str());
+        printf("Structured: [%s] [%s] %s\n", entry.levelStr.c_str(), entry.tag.c_str(), entry.message.c_str());
+    });
+
     // Basic Usage
     Shin::LOGI(TAG) << "ShinLog initialized successfully.";
+    
+    if (callbackCalled) {
+        printf("SUCCESS: Callback was triggered!\n");
+    } else {
+        printf("FAILURE: Callback was NOT triggered!\n");
+        return 1;
+    }
+
     Shin::LOGW(TAG) << "This is a warning message.";
     Shin::LOGE(TAG) << "Simulating an error!";
 

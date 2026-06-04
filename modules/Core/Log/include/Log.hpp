@@ -2,9 +2,20 @@
 
 #include <sstream>
 #include <utility>
+#include <memory>
+#include <functional>
+#include <string>
+#include <spdlog/fwd.h>
 
-// For static library, we don't need dllexport/dllimport.
-#define SHIN_API
+#ifdef _WIN32
+    #ifdef SHIN_CORE_EXPORTS
+        #define SHIN_API __declspec(dllexport)
+    #else
+        #define SHIN_API __declspec(dllimport)
+    #endif
+#else
+    #define SHIN_API __attribute__((visibility("default")))
+#endif
 
 namespace Shin {
     enum class LogLevel {
@@ -17,11 +28,31 @@ namespace Shin {
 
     class SHIN_API Log {
     public:
+        // Structured log data
+        struct LogEntry {
+            LogLevel level;
+            std::string levelStr;
+            std::string tag;
+            std::string message;
+            long long timestamp; // Unix timestamp in milliseconds
+        };
+
         // Initialize the logging system
         static void Init();
 
         // Print a raw message string
         static void Print(LogLevel level, const char* tag, const char* msg);
+
+        // Add a spdlog sink directly
+        static void AddSink(std::shared_ptr<spdlog::sinks::sink> sink);
+
+        // Add a simple callback sink
+        using LogCallback = std::function<void(LogLevel level, const char* tag, const char* msg)>;
+        static void AddCallbackSink(LogCallback callback);
+
+        // Add a structured JSON callback sink (useful for Webview/Remote)
+        using JsonLogCallback = std::function<void(const std::string& jsonMsg, const LogEntry& entry)>;
+        static void AddJsonCallbackSink(JsonLogCallback callback);
     };
 
     // A temporary stream object that collects the log message via operator<<

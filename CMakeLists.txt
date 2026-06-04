@@ -28,5 +28,15 @@ add_subdirectory(third_party)
 # Add the modules folder, which will manage all sub-modules internally
 add_subdirectory(modules)
 
+# ==========================================
+# Main Application
+# ==========================================
+add_executable(ShinApp main.cpp)
+target_link_libraries(ShinApp PRIVATE 
+    Shin::Core 
+    Shin::UI::Webview
+)
+set_target_properties(ShinApp PROPERTIES FOLDER "Application")
+
 # Add integration tests
 add_subdirectory(test/1-AuthSharedMemoryWebview)

@@ -7,11 +7,13 @@ target_include_directories(Core PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# Link spdlog (PRIVATE to hide dependency from consumers)
+# Link spdlog (PUBLIC because Log.hpp uses spdlog types in public interface)
 if(TARGET spdlog::spdlog)
-    target_link_libraries(Core PRIVATE spdlog::spdlog)
+    target_link_libraries(Core PUBLIC spdlog::spdlog)
+    target_link_libraries(Core PRIVATE nlohmann_json::nlohmann_json)
 else()
-    target_link_libraries(Core PRIVATE spdlog)
+    target_link_libraries(Core PUBLIC spdlog)
+    target_link_libraries(Core PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
 # Test executable for this module
