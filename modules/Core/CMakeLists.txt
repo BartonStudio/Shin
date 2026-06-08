@@ -13,9 +13,10 @@ target_link_libraries(Core PUBLIC toml11::toml11)
 # Add Core submodules
 add_subdirectory(Log)
 add_subdirectory(Config)
+add_subdirectory(TaskLoop)
 
 # Add top-level Core sources
-target_sources(Core PRIVATE src/Module.cpp)
+target_sources(Core PRIVATE Module.cpp)
 
 # Add top-level Core headers to the target
 target_include_directories(Core PUBLIC

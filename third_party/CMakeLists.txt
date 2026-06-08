@@ -1,5 +1,7 @@
 # Build third-party dependencies
 
+add_subdirectory(HCSDK)
+
 # Group all targets created in this directory (and subdirectories) into the "ThirdParty" folder in IDEs
 set(CMAKE_FOLDER "ThirdParty")
 

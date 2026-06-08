@@ -5,188 +5,173 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>Shin Application</title>
+    <title>Shin Application - Video Monitor</title>
     <style>
-        body { margin: 0; font-family: sans-serif; background: #1e1e1e; color: #fff; }
-        
-        /* Title Bar */
-        #title-bar {
-            height: 32px;
-            background: #333;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 10px;
-            cursor: default;
-            user-select: none;
-        }
-        
-        #title { font-size: 14px; font-weight: bold; }
-        
-        .btn {
-            background: none;
-            border: none;
-            color: #fff;
-            padding: 5px 10px;
-            cursor: pointer;
-        }
-        .btn:hover { background: #555; }
-        
-        #content { padding: 20px; }
-
-        .control-group {
-            margin-bottom: 15px;
-            background: #2d2d2d;
-            padding: 15px;
-            border-radius: 4px;
-        }
-        .control-group label { display: block; margin-bottom: 5px; color: #aaa; }
-        .input-row { display: flex; gap: 10px; align-items: center; }
-        input[type="number"] {
-            background: #444;
-            border: 1px solid #555;
-            color: #fff;
-            padding: 8px;
-            border-radius: 4px;
-            width: 80px;
-        }
-        .apply-btn {
-            background: #007acc;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .apply-btn:hover { background: #0062a3; }
-
-        /* Floating DevTools Button */
-        #dev-tools-fab {
-            position: fixed;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 8px;
-            height: 60px;
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            border-radius: 4px 0 0 4px;
-            cursor: pointer;
-            z-index: 9999;
-            transition: width 0.2s, background 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            color: transparent;
-            font-size: 10px;
-            white-space: nowrap;
-        }
-        #dev-tools-fab:hover {
-            width: 40px;
-            background: rgba(0, 122, 204, 0.8);
-            color: white;
-        }
-        #dev-tools-fab::after {
-            content: "F12";
-        }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        #title-bar { height: 36px; background: #1e1e1e; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; cursor: default; user-select: none; border-bottom: 1px solid #333; }
+        #title { font-size: 13px; font-weight: 500; color: #aaa; }
+        .btn { background: none; border: none; color: #888; padding: 6px 12px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .btn:hover { background: #333; color: #fff; }
+        .btn-close:hover { background: #c42b1c; color: #fff; }
+        #main-container { flex: 1; display: flex; flex-direction: column; padding: 16px; gap: 16px; overflow: hidden; }
+        #video-panel { flex: 1; background: #000; border-radius: 8px; overflow: hidden; border: 1px solid #333; position: relative; display: flex; align-items: center; justify-content: center; }
+        canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+        #video-placeholder { color: #444; text-align: center; position: absolute; }
+        #video-placeholder span { display: block; font-size: 48px; margin-bottom: 10px; }
+        .control-panel { background: #1e1e1e; padding: 16px; border-radius: 8px; border: 1px solid #333; }
+        h2 { margin: 0 0 16px 0; font-size: 16px; font-weight: 500; color: #007acc; }
+        .input-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        .input-group label { font-size: 11px; color: #666; text-transform: uppercase; }
+        input { background: #252526; border: 1px solid #3e3e42; color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 13px; outline: none; }
+        .primary-btn { background: #007acc; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 500; min-width: 120px; }
+        .primary-btn:hover { background: #1c97ea; }
+        .danger-btn { background: #c42b1c; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: 500; min-width: 120px; }
+        .danger-btn:hover { background: #e81123; }
+        #status-tag { position: absolute; top: 12px; left: 12px; padding: 4px 8px; background: rgba(0,0,0,0.6); border-radius: 4px; font-size: 11px; color: #00ff00; z-index: 10; display: none; }
+        #dev-tools-fab { position: fixed; right: 0; top: 50%; transform: translateY(-50%); width: 6px; height: 40px; background: #333; border: none; border-radius: 4px 0 0 4px; cursor: pointer; transition: width 0.2s; z-index: 1000; }
+        #dev-tools-fab:hover { width: 30px; background: #007acc; }
     </style>
 </head>
 <body>
-    <!-- Floating DevTools Trigger -->
-    <button id="dev-tools-fab" title="Open DevTools" onclick="sendAction(event, 'WindowOpenDevTools')"></button>
-
+    <button id="dev-tools-fab" onclick="sendToCpp('WindowOpenDevTools')"></button>
     <div id="title-bar" onmousedown="onMouseDown(event)" onmousemove="onMouseMove(event)" onmouseup="onMouseUp()" ondblclick="toggleMaximize()">
-        <div id="title">Shin Application</div>
+        <div id="title">SHIN MONITOR - REALTIME VIDEO</div>
         <div id="controls">
-            <button class="btn" onclick="sendAction(event, 'WindowMinimize')">─</button>
-            <button class="btn" onclick="sendAction(event, 'WindowToggleMaximize')">□</button>
-            <button class="btn" onclick="sendAction(event, 'WindowClose')" style="color: #ff5f56;">✕</button>
+            <button class="btn" onclick="sendToCpp('WindowMinimize')">－</button>
+            <button class="btn" onclick="sendToCpp('WindowToggleMaximize')">▢</button>
+            <button class="btn btn-close" onclick="sendToCpp('WindowClose')">✕</button>
         </div>
     </div>
-    
-    <div id="content">
-        <h1>Welcome to Shin</h1>
-        <p>This is the frontend UI.</p>
-
-        <div class="control-group">
-            <label>Window Size Settings</label>
+    <div id="main-container">
+        <div id="video-panel">
+            <div id="status-tag">● LIVE</div>
+            <div id="video-placeholder"><span>📷</span>Waiting for stream...</div>
+            <canvas id="gl-canvas"></canvas>
+        </div>
+        <div class="control-panel">
             <div class="input-row">
-                <input type="number" id="win-width" placeholder="Width" value="800">
-                <span>x</span>
-                <input type="number" id="win-height" placeholder="Height" value="600">
-                <button class="apply-btn" onclick="applySize()">Apply Size</button>
+                <div class="input-group"><label>IP Address</label><input type="text" id="cam-ip" value="192.168.31.242"></div>
+                <div class="input-group"><label>Port</label><input type="number" id="cam-port" value="8000" style="width: 80px;"></div>
+                <div class="input-group"><label>Username</label><input type="text" id="cam-user" value="admin"></div>
+                <div class="input-group"><label>Password</label><input type="password" id="cam-pwd" value="LWJ258258lwj"></div>
+                <button id="conn-btn" class="primary-btn" onclick="toggleConnection()">Connect</button>
             </div>
         </div>
     </div>
 
     <script>
-        let isDragging = false;
-        let isMouseDown = false;
-        let startX, startY;
+        const canvas = document.getElementById('gl-canvas');
+        let gl = canvas.getContext('webgl', { antialias: false, depth: false });
+        const connBtn = document.getElementById('conn-btn');
+        
+        let stateArray = null, dataArray = null, videoWidth = 0, videoHeight = 0, texture = null;
+        let isConnected = false, currentStreamId = -1;
 
-        function onMouseDown(e) {
-            if (e.target.id !== 'title-bar' && e.target.id !== 'title') return;
-            isMouseDown = true;
-            startX = e.clientX;
-            startY = e.clientY;
+        const STATE_READY = 2, STATE_READING = 3, STATE_IDLE = 0;
+
+        // WebGL Setup
+        if (gl) {
+            const vs = `attribute vec2 pos; attribute vec2 tex; varying vec2 vTex; void main() { gl_Position = vec4(pos, 0, 1); vTex = tex; }`;
+            const fs = `precision mediump float; uniform sampler2D sampler; varying vec2 vTex; void main() { gl_FragColor = texture2D(sampler, vTex); }`;
+            const createShader = (gl, type, source) => {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, source);
+                gl.compileShader(s);
+                return s;
+            };
+            const program = gl.createProgram();
+            gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vs));
+            gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fs));
+            gl.linkProgram(program); gl.useProgram(program);
+            const vertices = new Float32Array([-1,1,0,0, 1,1,1,0, -1,-1,0,1, 1,-1,1,1]);
+            const vbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbuf); gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            const pLoc = gl.getAttribLocation(program, "pos"); gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 16, 0);
+            const tLoc = gl.getAttribLocation(program, "tex"); gl.enableVertexAttribArray(tLoc); gl.vertexAttribPointer(tLoc, 2, gl.FLOAT, false, 16, 8);
         }
 
-        function applySize() {
-            const width = parseInt(document.getElementById('win-width').value);
-            const height = parseInt(document.getElementById('win-height').value);
+        // Communication
+        function sendToCpp(action, payload = {}) {
+            if (window.Shin && window.Shin.sendDataToCpp) {
+                window.Shin.sendDataToCpp({ action, ...payload });
+            }
+        }
+
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('sharedbufferreceived', (e) => {
+                const buffer = e.getBuffer();
+                const meta = e.additionalData;
+                if (meta.action === "HikvisionStreamConnect" || meta.action === "SharedMemoryUpdate") {
+                    if (meta.action === "HikvisionStreamConnect") {
+                        currentStreamId = meta.id;
+                        setConnectedState(true);
+                    }
+                    if (!stateArray || videoWidth !== meta.width) {
+                        initRenderer(buffer, meta.width, meta.height);
+                    }
+                    renderFrame();
+                }
+            });
+        }
+
+        function initRenderer(buffer, w, h) {
+            videoWidth = w; videoHeight = h;
+            canvas.width = w; canvas.height = h;
+            // Note: Stable state uses offset 0 because we reverted atomic lock from C++
+            dataArray = new Uint8Array(buffer, 0);
             
-            if (isNaN(width) || isNaN(height)) {
-                alert("Please enter valid numbers for width and height");
-                return;
-            }
+            if (texture) gl.deleteTexture(texture);
+            texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-            if (window.Shin && window.Shin.sendDataToCpp) {
-                window.Shin.sendDataToCpp({
-                    action: 'WindowSetSize',
-                    width: width,
-                    height: height,
-                    fixed: false
-                });
-            }
+            document.getElementById('video-placeholder').style.display = 'none';
+            document.getElementById('status-tag').style.display = 'block';
+            document.getElementById('status-tag').innerText = `● LIVE (${w}x${h})`;
+            gl.viewport(0, 0, w, h);
         }
 
-        function onMouseMove(e) {
-            if (!isMouseDown) return;
-            // 如果移动超过 5 像素，则触发原生拖拽
-            if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
-                isDragging = true;
-                if (window.Shin && window.Shin.sendDataToCpp) {
-                    window.Shin.sendDataToCpp({ action: 'WindowDrag' });
-                }
-                isMouseDown = false;
-            }
+        function renderFrame() {
+            if (!gl || !dataArray) return;
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, videoWidth, videoHeight, 0, gl.RGB, gl.UNSIGNED_BYTE, dataArray);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         }
 
-        function onMouseUp() {
-            isMouseDown = false;
-        }
-
-        // Toggle maximize
-        function toggleMaximize() {
-            isMouseDown = false; // 取消拖拽状态
-            if (window.Shin && window.Shin.sendDataToCpp) {
-                window.Shin.sendDataToCpp({ action: 'WindowToggleMaximize' });
+        function toggleConnection() {
+            if (!isConnected) {
+                const ip = document.getElementById('cam-ip').value, 
+                      port = parseInt(document.getElementById('cam-port').value), 
+                      user = document.getElementById('cam-user').value, 
+                      pwd = document.getElementById('cam-pwd').value;
+                sendToCpp('HikvisionStreamConnect', { ip, port, username: user, password: pwd });
+            } else {
+                sendToCpp('HikvisionStreamDisconnect', { id: currentStreamId });
+                setConnectedState(false);
             }
         }
 
-        async function sendAction(e, action) {
-            e.stopPropagation();
-            e.preventDefault();
-
-            if (window.Shin && window.Shin.sendDataToCpp) {
-                try {
-                    await window.Shin.sendDataToCpp({ action: action });
-                } catch (err) {
-                    console.error("Failed to send action to C++:", err);
-                }
+        function setConnectedState(connected) {
+            isConnected = connected;
+            connBtn.innerText = connected ? "Disconnect" : "Connect";
+            connBtn.className = connected ? "danger-btn" : "primary-btn";
+            if (!connected) {
+                document.getElementById('video-placeholder').style.display = 'block';
+                document.getElementById('status-tag').style.display = 'none';
+                if (gl) { gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
+                dataArray = null;
             }
         }
+
+        // Window interaction helpers
+        let isMouseDown = false, startX, startY;
+        function onMouseDown(e) { if (e.target.closest('#controls')) return; isMouseDown = true; startX = e.clientX; startY = e.clientY; }
+        function onMouseMove(e) { if (isMouseDown && (Math.abs(e.clientX-startX)>5 || Math.abs(e.clientY-startY)>5)) { sendToCpp('WindowDrag'); isMouseDown = false; } }
+        function onMouseUp() { isMouseDown = false; }
+        function toggleMaximize() { sendToCpp('WindowToggleMaximize'); }
     </script>
 </body>
 </html>

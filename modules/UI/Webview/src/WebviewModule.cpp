@@ -50,12 +50,11 @@ namespace UI {
                 HWND hwnd = (HWND)webview.GetNativeWindow();
                 if (hwnd) {
                     LONG style = GetWindowLong(hwnd, GWL_STYLE);
-                    // Remove WS_CAPTION but KEEP WS_THICKFRAME to allow resizing
-                    style &= ~WS_CAPTION;
-                    style |= WS_THICKFRAME;
+                    // Remove WS_CAPTION and WS_THICKFRAME to remove border/title bar/resizing
+                    style &= ~(WS_CAPTION | WS_THICKFRAME);
                     SetWindowLong(hwnd, GWL_STYLE, style);
                     SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-                    LOGI("Webview") << "Applied frameless style (WS_THICKFRAME kept for resizing).";
+                    LOGI("Webview") << "Applied simple frameless style.";
                 }
             }
 

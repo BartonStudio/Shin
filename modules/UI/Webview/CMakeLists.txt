@@ -11,11 +11,12 @@ target_compile_features(UIWebview PUBLIC cxx_std_17)
 target_include_directories(UIWebview PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    ${CMAKE_SOURCE_DIR}/src/Service
 )
 
 # Statically link the configured webview::core_static and nlohmann_json and Shin::Core
 target_link_libraries(UIWebview PUBLIC nlohmann_json::nlohmann_json)
-target_link_libraries(UIWebview PRIVATE webview::core_static Shin::Core)
+target_link_libraries(UIWebview PRIVATE webview::core_static Shin::Core Service)
 if(WIN32)
     target_include_directories(UIWebview PRIVATE "${CMAKE_BINARY_DIR}/_deps/microsoft_web_webview2-src/build/native/include")
 endif()
