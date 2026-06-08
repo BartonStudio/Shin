@@ -65,6 +65,7 @@ namespace Service {
             long playHandle = -1;
             long playPort = -1;
             bool sharedMemoryInitialized = false;
+            std::atomic<bool> isProcessingFrame{false};
         };
 
         std::mutex m_mutex;

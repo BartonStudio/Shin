@@ -93,6 +93,10 @@ namespace Service {
                             std::lock_guard<std::mutex> lock(svc.m_mutex);
                             for (auto& pair : svc.m_streams) {
                                 if (pair.second->playPort == nPort) {
+                                    // Check if we're already processing a frame for this stream
+                                    if (pair.second->isProcessingFrame.exchange(true)) {
+                                        return; // Drop the frame
+                                    }
                                     sid = pair.first;
                                     break;
                                 }
@@ -107,43 +111,78 @@ namespace Service {
 
                         Core::TaskLoop::GetInstance().PostTask([sid, yuvCopy, w, h]() {
                             auto& service = VideoService::GetInstance();
-                            std::lock_guard<std::mutex> lock(service.m_mutex);
-                            auto it = service.m_streams.find(sid);
-                            if (it == service.m_streams.end() || !it->second->running || !service.m_manager) return;
+                            
+                            // Use a unique_ptr-like pattern to ensure isProcessingFrame is reset
+                            auto guard = std::shared_ptr<void>(nullptr, [&service, sid](void*) {
+                                std::lock_guard<std::mutex> lock(service.m_mutex);
+                                auto it = service.m_streams.find(sid);
+                                if (it != service.m_streams.end()) {
+                                    it->second->isProcessingFrame = false;
+                                }
+                            });
 
-                            auto& ctx = it->second;
-                            auto& manager = *service.m_manager;
-
-                            cv::Mat rgb;
-                            cv::cvtColor(yuvCopy, rgb, cv::COLOR_YUV2RGB_YV12);
-
-                            if (!ctx->sharedMemoryInitialized) {
-                                int shmId = -1;
-                                size_t totalSize = rgb.total() * rgb.elemSize();
-                                void* ptr = manager.CreateSharedMemory(shmId, totalSize);
-                                if (ptr) {
-                                    ctx->sharedMemId = shmId;
-                                    ctx->sharedMemoryInitialized = true;
-                                    
-                                    nlohmann::json res;
-                                    res["action"] = "HikvisionStreamConnect";
-                                    res["id"] = shmId;
-                                    res["size"] = totalSize;
-                                    res["width"] = w;
-                                    res["height"] = h;
-                                    manager.PostSharedMemoryToWeb(shmId, res.dump());
+                            // 1. Initial check with minimal lock scope
+                            bool needsInit = false;
+                            size_t totalSize = 0;
+                            {
+                                std::lock_guard<std::mutex> lock(service.m_mutex);
+                                auto it = service.m_streams.find(sid);
+                                if (it == service.m_streams.end() || !it->second->running || !service.m_manager) return;
+                                
+                                if (!it->second->sharedMemoryInitialized) {
+                                    needsInit = true;
+                                    // Pre-calculate size while we have the context
+                                    totalSize = (size_t)w * h * 3; // RGB elemSize is 3
                                 }
                             }
 
-                            void* sharedMem = manager.GetSharedMemory(ctx->sharedMemId);
-                            if (sharedMem) {
-                                memcpy(sharedMem, rgb.data, rgb.total() * rgb.elemSize());
-                                nlohmann::json update;
-                                update["action"] = "SharedMemoryUpdate";
-                                update["id"] = ctx->sharedMemId;
-                                update["width"] = w;
-                                update["height"] = h;
-                                manager.PostSharedMemoryToWeb(ctx->sharedMemId, update.dump());
+                            // 2. Perform expensive color conversion outside the lock
+                            cv::Mat rgb;
+                            cv::cvtColor(yuvCopy, rgb, cv::COLOR_YUV2RGB_YV12);
+                            totalSize = rgb.total() * rgb.elemSize();
+
+                            auto& manager = *service.m_manager;
+
+                            // 3. Handle initialization if needed, WITHOUT holding the lock
+                            // because CreateSharedMemory might block waiting for the UI thread.
+                            if (needsInit) {
+                                int shmId = -1;
+                                void* ptr = manager.CreateSharedMemory(shmId, totalSize);
+                                if (ptr) {
+                                    std::lock_guard<std::mutex> lock(service.m_mutex);
+                                    auto it = service.m_streams.find(sid);
+                                    if (it != service.m_streams.end() && it->second->running) {
+                                        it->second->sharedMemId = shmId;
+                                        it->second->sharedMemoryInitialized = true;
+                                        
+                                        nlohmann::json res;
+                                        res["action"] = "HikvisionStreamConnect";
+                                        res["id"] = shmId;
+                                        res["size"] = totalSize;
+                                        res["width"] = w;
+                                        res["height"] = h;
+                                        manager.PostSharedMemoryToWeb(shmId, res.dump());
+                                    } else {
+                                        // Stream was closed while we were creating memory
+                                        manager.DestroySharedMemory(shmId);
+                                    }
+                                }
+                            }
+
+                            // 4. Update the memory content
+                            std::lock_guard<std::mutex> lock(service.m_mutex);
+                            auto it = service.m_streams.find(sid);
+                            if (it != service.m_streams.end() && it->second->running && it->second->sharedMemoryInitialized) {
+                                void* sharedMem = manager.GetSharedMemory(it->second->sharedMemId);
+                                if (sharedMem) {
+                                    memcpy(sharedMem, rgb.data, totalSize);
+                                    nlohmann::json update;
+                                    update["action"] = "SharedMemoryUpdate";
+                                    update["id"] = it->second->sharedMemId;
+                                    update["width"] = w;
+                                    update["height"] = h;
+                                    manager.PostSharedMemoryToWeb(it->second->sharedMemId, update.dump());
+                                }
                             }
                         });
                     });
@@ -189,6 +228,7 @@ namespace Service {
         previewInfo.dwStreamType = 0; 
         previewInfo.dwLinkMode = (transportProtocol == "UDP") ? 1 : 0; 
         previewInfo.bBlocked = 1;
+        previewInfo.dwDisplayBufNum = 1;
 
         long playHandle = NET_DVR_RealPlay_V40(userId, &previewInfo, &VideoService::RealDataCallBack, NULL);
         if (playHandle < 0) {

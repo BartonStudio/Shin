@@ -8,6 +8,7 @@
 #include <vector>
 #include <algorithm>
 #include <filesystem>
+#include <future>
 
 #include <unordered_map>
 
@@ -454,6 +455,24 @@ namespace UI {
         outId = -1;
         if (!m_impl->isInitialized || !m_impl->w || size == 0) return nullptr;
 
+        // WebView2 COM objects must be accessed on the UI thread (STA).
+        // If we are on a background thread, dispatch the task and wait for the result.
+        if (std::this_thread::get_id() != m_impl->uiThreadId) {
+            struct Result { void* ptr; int id; };
+            auto promise = std::make_shared<std::promise<Result>>();
+            auto future = promise->get_future();
+
+            m_impl->w->dispatch([this, promise, size]() {
+                int id = -1;
+                void* ptr = this->CreateSharedMemory(id, size);
+                promise->set_value({ptr, id});
+            });
+
+            auto res = future.get();
+            outId = res.id;
+            return res.ptr;
+        }
+
 #ifdef _WIN32
         auto controller = (ICoreWebView2Controller*)GetNativeController();
         if (!controller) return nullptr;
@@ -491,6 +510,18 @@ namespace UI {
 
     bool WebviewWrapper::ResizeSharedMemory(int id, size_t newSize) {
         if (!m_impl->isInitialized || !m_impl->w || newSize == 0) return false;
+
+        if (std::this_thread::get_id() != m_impl->uiThreadId) {
+            auto promise = std::make_shared<std::promise<bool>>();
+            auto future = promise->get_future();
+
+            m_impl->w->dispatch([this, promise, id, newSize]() {
+                bool result = this->ResizeSharedMemory(id, newSize);
+                promise->set_value(result);
+            });
+
+            return future.get();
+        }
 
 #ifdef _WIN32
         auto it = m_impl->sharedMemories.find(id);

@@ -36,7 +36,7 @@ int main() {
                 return;
             }
 
-            int id = Shin::Service::VideoService::GetInstance().ConnectStream(ip, port, username, password);
+            int id = Shin::Service::VideoService::GetInstance().ConnectStream(ip, port, username, password, "", "UDP");
             if (id == -1) {
                 res["action"] = "ErrorReport";
                 res["msg"] = "连接海康摄像头失败";
