@@ -70,6 +70,7 @@ namespace Service {
 
         std::mutex m_mutex;
         std::unordered_map<int, std::unique_ptr<StreamContext>> m_streams;
+        int m_nextStreamId = 1;
         
         static std::unordered_map<long, int> s_handleToId;
         static std::mutex s_handleMutex;

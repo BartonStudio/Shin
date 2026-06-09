@@ -42,6 +42,7 @@ int main() {
                 res["msg"] = "连接海康摄像头失败";
                 sendResponse(res);
             } else {
+                res["id"] = id;
                 res["msg"] = "连接指令已发送";
                 sendResponse(res);
             }

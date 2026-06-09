@@ -157,7 +157,8 @@ namespace Service {
                                         
                                         nlohmann::json res;
                                         res["action"] = "HikvisionStreamConnect";
-                                        res["id"] = shmId;
+                                        res["id"] = sid; // Use stream ID here, not shmId
+                                        res["shmId"] = shmId; // Provide shmId separately
                                         res["size"] = totalSize;
                                         res["width"] = w;
                                         res["height"] = h;
@@ -178,7 +179,8 @@ namespace Service {
                                     memcpy(sharedMem, rgb.data, totalSize);
                                     nlohmann::json update;
                                     update["action"] = "SharedMemoryUpdate";
-                                    update["id"] = it->second->sharedMemId;
+                                    update["id"] = sid; // Use stream ID
+                                    update["shmId"] = it->second->sharedMemId;
                                     update["width"] = w;
                                     update["height"] = h;
                                     manager.PostSharedMemoryToWeb(it->second->sharedMemId, update.dump());
@@ -244,7 +246,7 @@ namespace Service {
         context->playPort = -1;
 
         std::lock_guard<std::mutex> lock(m_mutex);
-        int streamId = (int)playHandle;
+        int streamId = m_nextStreamId++;
         
         {
             std::lock_guard<std::mutex> lockHandle(s_handleMutex);
@@ -260,27 +262,44 @@ namespace Service {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_streams.find(id);
         if (it != m_streams.end()) {
-            it->second->running = false;
+            auto& context = it->second;
+            context->running = false;
             
-            if (it->second->playPort >= 0) {
-                PlayM4_Stop(it->second->playPort);
-                PlayM4_CloseStream(it->second->playPort);
-                PlayM4_FreePort(it->second->playPort);
+            // 1. First, stop the decoding and unregister callback to prevent new frames from being processed
+            if (context->playPort >= 0) {
+                PlayM4_SetDecCallBack(context->playPort, NULL); // Unregister callback
+                PlayM4_Stop(context->playPort);
+                PlayM4_CloseStream(context->playPort);
+                PlayM4_FreePort(context->playPort);
+                context->playPort = -1;
             }
 
-            NET_DVR_StopRealPlay(it->second->playHandle);
-            NET_DVR_Logout(it->second->userId);
-            
-            if (m_manager) {
-                m_manager->DestroySharedMemory(it->second->sharedMemId);
+            // 2. Stop SDK real play and logout
+            if (context->playHandle >= 0) {
+                NET_DVR_StopRealPlay(context->playHandle);
+                {
+                    std::lock_guard<std::mutex> lockHandle(s_handleMutex);
+                    s_handleToId.erase(context->playHandle);
+                }
+                context->playHandle = -1;
+            }
+
+            if (context->userId >= 0) {
+                NET_DVR_Logout(context->userId);
+                context->userId = -1;
             }
             
-            {
-                std::lock_guard<std::mutex> lockHandle(s_handleMutex);
-                s_handleToId.erase(it->second->playHandle);
+            // 3. Destroy shared memory if it was initialized
+            if (m_manager && context->sharedMemoryInitialized && context->sharedMemId != -1) {
+                m_manager->DestroySharedMemory(context->sharedMemId);
+                context->sharedMemId = -1;
+                context->sharedMemoryInitialized = false;
             }
+            
+            // 4. Finally, remove from map. 
+            // Any pending PostTask lambdas will find the ID missing and return safely.
             m_streams.erase(it);
-            LOGI("VideoService") << "Disconnected stream ID " << id;
+            LOGI("VideoService") << "Disconnected and cleaned up stream ID " << id;
         }
     }
 
