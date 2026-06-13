@@ -65,13 +65,14 @@
         let gl = canvas.getContext('webgl', { antialias: false, depth: false });
         const connBtn = document.getElementById('conn-btn');
         
-        let stateArray = null, dataArray = null, videoWidth = 0, videoHeight = 0, texture = null;
+        let dataArray = null, videoWidth = 0, videoHeight = 0, texture = null;
         let isConnected = false, currentStreamId = -1;
 
         const STATE_READY = 2, STATE_READING = 3, STATE_IDLE = 0;
 
         // WebGL Setup
         if (gl) {
+            // ... (keep WebGL setup unchanged)
             const vs = `attribute vec2 pos; attribute vec2 tex; varying vec2 vTex; void main() { gl_Position = vec4(pos, 0, 1); vTex = tex; }`;
             const fs = `precision mediump float; uniform sampler2D sampler; varying vec2 vTex; void main() { gl_FragColor = texture2D(sampler, vTex); }`;
             const createShader = (gl, type, source) => {
@@ -88,6 +89,9 @@
             const vbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbuf); gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
             const pLoc = gl.getAttribLocation(program, "pos"); gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 16, 0);
             const tLoc = gl.getAttribLocation(program, "tex"); gl.enableVertexAttribArray(tLoc); gl.vertexAttribPointer(tLoc, 2, gl.FLOAT, false, 16, 8);
+            
+            // Initial state: hide canvas
+            canvas.style.display = 'none';
         }
 
         // Communication
@@ -101,12 +105,17 @@
             window.chrome.webview.addEventListener('sharedbufferreceived', (e) => {
                 const buffer = e.getBuffer();
                 const meta = e.additionalData;
+                
                 if (meta.action === "HikvisionStreamConnect" || meta.action === "SharedMemoryUpdate") {
                     if (meta.action === "HikvisionStreamConnect") {
                         currentStreamId = meta.id;
                         setConnectedState(true);
                     }
-                    if (!stateArray || videoWidth !== meta.width) {
+                    
+                    // If we've already disconnected, ignore any late-arriving frames
+                    if (!isConnected) return;
+                    
+                    if (!dataArray || videoWidth !== meta.width) {
                         initRenderer(buffer, meta.width, meta.height);
                     }
                     renderFrame();
@@ -117,7 +126,6 @@
         function initRenderer(buffer, w, h) {
             videoWidth = w; videoHeight = h;
             canvas.width = w; canvas.height = h;
-            // Note: Stable state uses offset 0 because we reverted atomic lock from C++
             dataArray = new Uint8Array(buffer, 0);
             
             if (texture) gl.deleteTexture(texture);
@@ -129,6 +137,7 @@
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
             document.getElementById('video-placeholder').style.display = 'none';
+            canvas.style.display = 'block';
             document.getElementById('status-tag').style.display = 'block';
             document.getElementById('status-tag').innerText = `● LIVE (${w}x${h})`;
             gl.viewport(0, 0, w, h);
@@ -160,6 +169,7 @@
             connBtn.className = connected ? "danger-btn" : "primary-btn";
             if (!connected) {
                 document.getElementById('video-placeholder').style.display = 'block';
+                canvas.style.display = 'none';
                 document.getElementById('status-tag').style.display = 'none';
                 if (gl) { gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
                 dataArray = null;

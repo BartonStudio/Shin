@@ -259,48 +259,58 @@ namespace Service {
     }
 
     void VideoService::DisconnectStream(int id) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_streams.find(id);
-        if (it != m_streams.end()) {
+        long userId = -1;
+        long playHandle = -1;
+        long playPort = -1;
+        int shmId = -1;
+
+        // 1. Lock only to extract handles and mark as not running
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_streams.find(id);
+            if (it == m_streams.end()) return;
+
             auto& context = it->second;
             context->running = false;
             
-            // 1. First, stop the decoding and unregister callback to prevent new frames from being processed
-            if (context->playPort >= 0) {
-                PlayM4_SetDecCallBack(context->playPort, NULL); // Unregister callback
-                PlayM4_Stop(context->playPort);
-                PlayM4_CloseStream(context->playPort);
-                PlayM4_FreePort(context->playPort);
-                context->playPort = -1;
+            userId = context->userId;
+            playHandle = context->playHandle;
+            playPort = context->playPort;
+            if (context->sharedMemoryInitialized) {
+                shmId = context->sharedMemId;
             }
-
-            // 2. Stop SDK real play and logout
-            if (context->playHandle >= 0) {
-                NET_DVR_StopRealPlay(context->playHandle);
-                {
-                    std::lock_guard<std::mutex> lockHandle(s_handleMutex);
-                    s_handleToId.erase(context->playHandle);
-                }
-                context->playHandle = -1;
-            }
-
-            if (context->userId >= 0) {
-                NET_DVR_Logout(context->userId);
-                context->userId = -1;
-            }
-            
-            // 3. Destroy shared memory if it was initialized
-            if (m_manager && context->sharedMemoryInitialized && context->sharedMemId != -1) {
-                m_manager->DestroySharedMemory(context->sharedMemId);
-                context->sharedMemId = -1;
-                context->sharedMemoryInitialized = false;
-            }
-            
-            // 4. Finally, remove from map. 
-            // Any pending PostTask lambdas will find the ID missing and return safely.
-            m_streams.erase(it);
-            LOGI("VideoService") << "Disconnected and cleaned up stream ID " << id;
         }
+
+        // 2. Perform blocking SDK calls WITHOUT holding m_mutex
+        if (playPort >= 0) {
+            PlayM4_SetDecCallBack(playPort, NULL);
+            PlayM4_Stop(playPort);
+            PlayM4_CloseStream(playPort);
+            PlayM4_FreePort(playPort);
+        }
+
+        if (playHandle >= 0) {
+            NET_DVR_StopRealPlay(playHandle);
+            {
+                std::lock_guard<std::mutex> lockHandle(s_handleMutex);
+                s_handleToId.erase(playHandle);
+            }
+        }
+
+        if (userId >= 0) {
+            NET_DVR_Logout(userId);
+        }
+
+        // 3. Re-lock to perform final cleanup
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_manager && shmId != -1) {
+                m_manager->DestroySharedMemory(shmId);
+            }
+            m_streams.erase(id);
+        }
+
+        LOGI("VideoService") << "Disconnected and cleaned up stream ID " << id;
     }
 
 } // namespace Service
