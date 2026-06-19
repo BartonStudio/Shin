@@ -12,17 +12,20 @@ namespace Shin {
              */
             inline const std::unordered_map<std::string, std::string> Manifest = {
                 // 应用基础信息
-                {"app_name", "Shin Application"},
+                {"Webview.app_name", "Shin Application"},
 
                 // 浏览器窗口尺寸
-                {"window_width", "960"},
-                {"window_height", "600"},
+                {"Webview.window_width", "960"},
+                {"Webview.window_height", "600"},
 
                 // 启动 URL
-                {"startup_url", "http://localhost:8080"},
+                {"Webview.startup_url", "http://localhost:8080"},
 
                 // 窗口样式
-                {"frameless", "true"}
+                {"Webview.frameless", "true"},
+
+                // 缓存目录
+                {"Webview.CachePath", "AppCache"}
             };
 
         } // namespace Defaults

@@ -183,7 +183,8 @@ namespace Shin {
 
                 if (!current->contains(k)) {
                     if (createMissing) {
-                        (*current)[k] = (i == keys.size() - 1) ? toml::value("") : toml::table{};
+                        // 始终创建一个 table 作为中间层或末端，除非明确需要标量
+                        (*current)[k] = toml::table{};
                     } else {
                         return nullptr;
                     }

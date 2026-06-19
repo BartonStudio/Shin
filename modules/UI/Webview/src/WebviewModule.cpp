@@ -2,13 +2,10 @@
 #include <Module.hpp>
 #include <Log.hpp>
 #include <Config.hpp>
+#include <IConfigurable.hpp>
 #include <atomic>
 #include <iostream>
-
-// Win32 headers for window style modification
-#ifdef _WIN32
 #include <windows.h>
-#endif
 
 namespace Shin {
 namespace UI {
@@ -18,27 +15,55 @@ namespace UI {
     /**
      * @brief Webview Module Implementation.
      */
-    class WebviewModule : public IModule {
+    class WebviewModule : public IModule, public Core::IConfigurable {
     public:
         std::string GetModuleName() const override { return "Webview"; }
 
+        std::string GetConfigPath() const override { return "Webview"; }
+
+        void OnConfigLoad(const toml::value& data) override {
+            std::string cacheDir = toml::find_or<std::string>(data, "CachePath", "AppCache");
+            
+            // 获取可执行文件目录并设置环境变量
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring strExePath(exePath);
+            size_t pos = strExePath.find_last_of(L"\\/");
+            std::wstring cachePath = strExePath.substr(0, pos) + L"\\" + std::wstring(cacheDir.begin(), cacheDir.end());
+            
+            SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", cachePath.c_str());
+            LOGI("Webview") << "WebView2 cache path set to: " << cacheDir;
+        }
+
+        void OnConfigSave(toml::value& data) const override {
+            // 确保 data 是 table 类型
+            if (!data.is_table()) {
+                data = toml::table{};
+            }
+            if (!data.contains("CachePath")) {
+                data["CachePath"] = "AppCache";
+            }
+        }
+
         bool OnInitialize(Core::Config& config) override {
+            // Register with Config to receive updates
+            config.Register(this);
+
             LOGI("Webview") << "Initializing Webview Module...";
             s_isShuttingDown = false;
 
             auto& webview = WebviewWrapper::GetInstance();
 
             // 1. Load configuration
-            std::string appName = config.GetValue("app_name", "Shin Application");
-            int width = std::stoi(config.GetValue("window_width", "1280"));
-            int height = std::stoi(config.GetValue("window_height", "720"));
-            bool isFrameless = config.GetValue("frameless", "true") == "true";
-
-            // 2. Configure Wrapper
-            webview.SetTitle(appName);
-            webview.SetSize(width, height, false);
-            webview.SetDebug(true);
-
+            std::string appName = config.GetValue("Webview.app_name", "Shin Application");
+            int width = std::stoi(config.GetValue("Webview.window_width", "1280"));
+            int height = std::stoi(config.GetValue("Webview.window_height", "720"));
+            bool isFrameless = config.GetValue("Webview.frameless", "true") == "true";
+            
+            // 4. Navigate to Startup URL
+            std::string startupUrl = config.GetValue("Webview.startup_url", "http://localhost:8080");
+            webview.Navigate(startupUrl);
+            LOGI("Webview") << "Navigating to: " << startupUrl;
             // 3. Initialize Native Webview
             if (!webview.Initialize()) {
                 LOGE("Webview") << "Failed to initialize native webview.";
@@ -61,7 +86,6 @@ namespace UI {
             }
 
             // 4. Navigate to Startup URL
-            std::string startupUrl = config.GetValue("startup_url", "http://localhost:8080");
             webview.Navigate(startupUrl);
             LOGI("Webview") << "Navigating to: " << startupUrl;
 

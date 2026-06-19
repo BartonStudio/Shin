@@ -365,6 +365,18 @@ namespace UI {
         return nullptr;
     }
 
+    void WebviewWrapper::OpenDevTools() {
+#ifdef _WIN32
+        auto controller = (ICoreWebView2Controller*)GetNativeController();
+        if (controller) {
+            Microsoft::WRL::ComPtr<ICoreWebView2> wv2;
+            if (SUCCEEDED(controller->get_CoreWebView2(&wv2))) {
+                wv2->OpenDevToolsWindow();
+            }
+        }
+#endif
+    }
+
     void* WebviewWrapper::GetNativeController() {
         if (m_impl->w) {
             auto res = m_impl->w->browser_controller();
