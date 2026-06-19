@@ -34,13 +34,13 @@
     </style>
 </head>
 <body>
-    <button id="dev-tools-fab" onclick="sendToCpp('WindowOpenDevTools')"></button>
+    <button id="dev-tools-fab" onclick="window.shin.send('WindowOpenDevTools')"></button>
     <div id="title-bar" onmousedown="onMouseDown(event)" onmousemove="onMouseMove(event)" onmouseup="onMouseUp()" ondblclick="toggleMaximize()">
         <div id="title">SHIN MONITOR - REALTIME VIDEO</div>
         <div id="controls">
-            <button class="btn" onclick="sendToCpp('WindowMinimize')">－</button>
-            <button class="btn" onclick="sendToCpp('WindowToggleMaximize')">▢</button>
-            <button class="btn btn-close" onclick="sendToCpp('WindowClose')">✕</button>
+            <button class="btn" onclick="window.shin.send('WindowMinimize')">－</button>
+            <button class="btn" onclick="window.shin.send('WindowToggleMaximize')">▢</button>
+            <button class="btn btn-close" onclick="window.shin.send('WindowClose')">✕</button>
         </div>
     </div>
     <div id="main-container">
@@ -60,19 +60,18 @@
         </div>
     </div>
 
+    <script src="ShinBridge.js"></script>
     <script>
+        // --- 渲染逻辑 (保持在 HTML 中，解耦通信) ---
         const canvas = document.getElementById('gl-canvas');
         let gl = canvas.getContext('webgl', { antialias: false, depth: false });
-        const connBtn = document.getElementById('conn-btn');
-        
         let dataArray = null, videoWidth = 0, videoHeight = 0, texture = null;
+        
+        // --- 业务逻辑 (使用 ShinBridge) ---
         let isConnected = false, currentStreamId = -1;
+        const connBtn = document.getElementById('conn-btn');
 
-        const STATE_READY = 2, STATE_READING = 3, STATE_IDLE = 0;
-
-        // WebGL Setup
         if (gl) {
-            // ... (keep WebGL setup unchanged)
             const vs = `attribute vec2 pos; attribute vec2 tex; varying vec2 vTex; void main() { gl_Position = vec4(pos, 0, 1); vTex = tex; }`;
             const fs = `precision mediump float; uniform sampler2D sampler; varying vec2 vTex; void main() { gl_FragColor = texture2D(sampler, vTex); }`;
             const createShader = (gl, type, source) => {
@@ -89,45 +88,13 @@
             const vbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbuf); gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
             const pLoc = gl.getAttribLocation(program, "pos"); gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 16, 0);
             const tLoc = gl.getAttribLocation(program, "tex"); gl.enableVertexAttribArray(tLoc); gl.vertexAttribPointer(tLoc, 2, gl.FLOAT, false, 16, 8);
-            
-            // Initial state: hide canvas
             canvas.style.display = 'none';
-        }
-
-        // Communication
-        function sendToCpp(action, payload = {}) {
-            if (window.Shin && window.Shin.sendDataToCpp) {
-                window.Shin.sendDataToCpp({ action, ...payload });
-            }
-        }
-
-        if (window.chrome && window.chrome.webview) {
-            window.chrome.webview.addEventListener('sharedbufferreceived', (e) => {
-                const buffer = e.getBuffer();
-                const meta = e.additionalData;
-                
-                if (meta.action === "HikvisionStreamConnect" || meta.action === "SharedMemoryUpdate") {
-                    if (meta.action === "HikvisionStreamConnect") {
-                        currentStreamId = meta.id;
-                        setConnectedState(true);
-                    }
-                    
-                    // If we've already disconnected, ignore any late-arriving frames
-                    if (!isConnected) return;
-                    
-                    if (!dataArray || videoWidth !== meta.width) {
-                        initRenderer(buffer, meta.width, meta.height);
-                    }
-                    renderFrame();
-                }
-            });
         }
 
         function initRenderer(buffer, w, h) {
             videoWidth = w; videoHeight = h;
             canvas.width = w; canvas.height = h;
             dataArray = new Uint8Array(buffer, 0);
-            
             if (texture) gl.deleteTexture(texture);
             texture = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -135,11 +102,10 @@
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
             document.getElementById('video-placeholder').style.display = 'none';
             canvas.style.display = 'block';
-            document.getElementById('status-tag').style.display = 'block';
-            document.getElementById('status-tag').innerText = `● LIVE (${w}x${h})`;
+            const tag = document.getElementById('status-tag');
+            tag.style.display = 'block'; tag.innerText = `● LIVE (${w}x${h})`;
             gl.viewport(0, 0, w, h);
         }
 
@@ -150,15 +116,34 @@
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         }
 
+        // 监听来自 C++ 的常规 JSON 消息 (通过 window.shin.on)
+        window.shin.on('SystemEvent', (data) => {
+            console.log("收到系统事件:", data.message);
+        });
+
+        // 监听视频流数据 (通过 ShinBridge 的订阅模式)
+        window.shin.on('sharedbuffer', (data) => {
+            const { buffer, meta } = data;
+            if (meta.action === "HikvisionStreamConnect" || meta.action === "SharedMemoryUpdate") {
+                if (meta.action === "HikvisionStreamConnect") {
+                    currentStreamId = meta.id;
+                    setConnectedState(true);
+                }
+                if (!isConnected) return;
+                if (!dataArray || videoWidth !== meta.width) initRenderer(buffer, meta.width, meta.height);
+                renderFrame();
+            }
+        });
+
         function toggleConnection() {
             if (!isConnected) {
                 const ip = document.getElementById('cam-ip').value, 
                       port = parseInt(document.getElementById('cam-port').value), 
                       user = document.getElementById('cam-user').value, 
                       pwd = document.getElementById('cam-pwd').value;
-                sendToCpp('HikvisionStreamConnect', { ip, port, username: user, password: pwd });
+                window.shin.send('HikvisionStreamConnect', { ip, port, username: user, password: pwd });
             } else {
-                sendToCpp('HikvisionStreamDisconnect', { id: currentStreamId });
+                window.shin.send('HikvisionStreamDisconnect', { id: currentStreamId });
                 setConnectedState(false);
             }
         }
@@ -176,12 +161,12 @@
             }
         }
 
-        // Window interaction helpers
+        // 窗口交互
         let isMouseDown = false, startX, startY;
         function onMouseDown(e) { if (e.target.closest('#controls')) return; isMouseDown = true; startX = e.clientX; startY = e.clientY; }
-        function onMouseMove(e) { if (isMouseDown && (Math.abs(e.clientX-startX)>5 || Math.abs(e.clientY-startY)>5)) { sendToCpp('WindowDrag'); isMouseDown = false; } }
+        function onMouseMove(e) { if (isMouseDown && (Math.abs(e.clientX-startX)>5 || Math.abs(e.clientY-startY)>5)) { window.shin.send('WindowDrag'); isMouseDown = false; } }
         function onMouseUp() { isMouseDown = false; }
-        function toggleMaximize() { sendToCpp('WindowToggleMaximize'); }
+        function toggleMaximize() { window.shin.send('WindowToggleMaximize'); }
     </script>
 </body>
 </html>

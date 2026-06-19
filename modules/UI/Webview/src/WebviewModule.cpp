@@ -45,6 +45,8 @@ namespace UI {
                 return false;
             }
 
+            webview.OpenDevTools();
+
             // Apply frameless style if needed
             if (isFrameless) {
                 HWND hwnd = (HWND)webview.GetNativeWindow();

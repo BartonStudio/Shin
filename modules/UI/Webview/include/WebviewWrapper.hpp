@@ -51,6 +51,8 @@ namespace UI {
 
         bool Initialize();
 
+        void OpenDevTools();
+
         void* GetNativeWindow();
         void* GetNativeController();
 

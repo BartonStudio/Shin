@@ -17,7 +17,7 @@
 auto& webview = Shin::UI::WebviewWrapper::GetInstance();
 
 // 构造 JSON 字符串
-std::string jsonPayload = "{\"type\": \"SystemEvent\", \"message\": \"Hello from C++\"}";
+std::string jsonPayload = "{\"action\": \"SystemEvent\", \"message\": \"Hello from C++\"}";
 
 // 异步发送给 JS
 webview.SendJson(jsonPayload);
@@ -31,7 +31,7 @@ if (window.chrome && window.chrome.webview) {
         // event.data 就是 C++ 传过来的 JSON 解析后的对象
         const data = event.data; 
         
-        if (data.type === 'SystemEvent') {
+        if (data.action === 'SystemEvent') {
             console.log("收到 C++ 的消息:", data.message);
         }
     });
