@@ -400,7 +400,7 @@ namespace UI {
     }
 
     void WebviewWrapper::Navigate(const std::string& url) {
-        if (m_impl->isInitialized && m_impl->w) {
+          if (m_impl->isInitialized && m_impl->w) {
             if (std::this_thread::get_id() == m_impl->uiThreadId) {
                 m_impl->w->navigate(url);
             } else {

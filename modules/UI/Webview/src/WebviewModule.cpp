@@ -1,4 +1,5 @@
 #include <WebviewWrapper.hpp>
+#include <WebviewMessageHandler.hpp>
 #include <Module.hpp>
 #include <Log.hpp>
 #include <Config.hpp>
@@ -29,10 +30,23 @@ namespace UI {
             GetModuleFileNameW(NULL, exePath, MAX_PATH);
             std::wstring strExePath(exePath);
             size_t pos = strExePath.find_last_of(L"\\/");
-            std::wstring cachePath = strExePath.substr(0, pos) + L"\\" + std::wstring(cacheDir.begin(), cacheDir.end());
+            std::wstring exeDir = strExePath.substr(0, pos);
+            std::wstring cachePath = exeDir + L"\\" + std::wstring(cacheDir.begin(), cacheDir.end());
             
             SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", cachePath.c_str());
             LOGI("Webview") << "WebView2 cache path set to: " << cacheDir;
+
+            // 读取并注入 DevMenu.js
+            std::wstring jsPath = exeDir + L"\\DevMenu.js";
+            std::ifstream jsFile(jsPath);
+            if (jsFile.is_open()) {
+                std::stringstream buffer;
+                buffer << jsFile.rdbuf();
+                WebviewWrapper::GetInstance().InjectJSBeforeLoad(buffer.str());
+                LOGI("Webview") << "DevMenu.js injected successfully.";
+            } else {
+                LOGW("Webview") << "DevMenu.js not found at: " << std::string(jsPath.begin(), jsPath.end());
+            }
         }
 
         void OnConfigSave(toml::value& data) const override {
@@ -60,32 +74,40 @@ namespace UI {
             int height = std::stoi(config.GetValue("Webview.window_height", "720"));
             bool isFrameless = config.GetValue("Webview.frameless", "true") == "true";
             
-            // 4. Navigate to Startup URL
-            std::string startupUrl = config.GetValue("Webview.startup_url", "http://localhost:8080");
-            webview.Navigate(startupUrl);
-            LOGI("Webview") << "Navigating to: " << startupUrl;
+            // 注册开发工具菜单相关 Action (复用内置的 WindowClose, WindowOpenDevTools)
+            UI::WebviewMessageHandler::RegisterAction("ZoomIn", [](const nlohmann::json&, nlohmann::json, auto) {
+                WebviewWrapper::GetInstance().ExecuteJS("document.body.style.zoom = (parseFloat(getComputedStyle(document.body).zoom) || 1) + 0.1;");
+            });
+            UI::WebviewMessageHandler::RegisterAction("ZoomOut", [](const nlohmann::json&, nlohmann::json, auto) {
+                WebviewWrapper::GetInstance().ExecuteJS("document.body.style.zoom = (parseFloat(getComputedStyle(document.body).zoom) || 1) - 0.1;");
+            });
+
+            // 2. Configure Wrapper
+            webview.SetTitle(appName);
+            webview.SetSize(width, height, false);
+            webview.SetDebug(true);
+
             // 3. Initialize Native Webview
             if (!webview.Initialize()) {
                 LOGE("Webview") << "Failed to initialize native webview.";
                 return false;
             }
 
-            webview.OpenDevTools();
+            // webview.OpenDevTools();
 
             // Apply frameless style if needed
             if (isFrameless) {
                 HWND hwnd = (HWND)webview.GetNativeWindow();
                 if (hwnd) {
                     LONG style = GetWindowLong(hwnd, GWL_STYLE);
-                    // Remove WS_CAPTION and WS_THICKFRAME to remove border/title bar/resizing
                     style &= ~(WS_CAPTION | WS_THICKFRAME);
                     SetWindowLong(hwnd, GWL_STYLE, style);
                     SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-                    LOGI("Webview") << "Applied simple frameless style.";
                 }
             }
 
             // 4. Navigate to Startup URL
+            std::string startupUrl = config.GetValue("Webview.startup_url", "http://localhost:8080");
             webview.Navigate(startupUrl);
             LOGI("Webview") << "Navigating to: " << startupUrl;
 

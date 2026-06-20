@@ -231,6 +231,17 @@ namespace WebviewMessageHandler {
             }
         }
 
+        void HandleNavigate(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
+            std::string url = req.value("url", "");
+            if (!url.empty()) {
+                WebviewWrapper::GetInstance().Navigate(url);
+            } else {
+                res["action"] = "ErrorReport";
+                res["msg"] = "Navigate URL is empty";
+                sendResponse(res);
+            }
+        }
+
         void HandleWindowSetSize(const nlohmann::json& req, nlohmann::json res, ResponseCallback sendResponse) {
             if (!req.contains("width") || !req["width"].is_number_integer() ||
                 !req.contains("height") || !req["height"].is_number_integer()) {
@@ -254,6 +265,7 @@ namespace WebviewMessageHandler {
             { "WindowToggleMaximize", { HandleWindowToggleMaximize, false } },
             { "WindowClose", { HandleWindowClose, false } },
             { "WindowOpenDevTools", { HandleWindowOpenDevTools, false } },
+            { "Navigate", { HandleNavigate, false } },
             { "WindowSetSize", { HandleWindowSetSize, false } }
         };
     }

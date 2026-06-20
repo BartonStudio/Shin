@@ -52,5 +52,10 @@ add_custom_command(TARGET ShinApp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DLLS} "$<TARGET_FILE_DIR:ShinApp>"
 )
 
+# Copy DevMenu.js
+add_custom_command(TARGET ShinApp POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/web/DevMenu.js" "$<TARGET_FILE_DIR:ShinApp>/DevMenu.js"
+)
+
 # Add integration tests
 add_subdirectory(test/1-AuthSharedMemoryWebview)
