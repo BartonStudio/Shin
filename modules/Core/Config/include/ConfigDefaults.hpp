@@ -25,7 +25,10 @@ namespace Shin {
                 {"Webview.frameless", "true"},
 
                 // 缓存目录
-                {"Webview.CachePath", "AppCache"}
+                {"Webview.CachePath", "AppCache"},
+
+                // 调试菜单开关
+                {"Webview.EnableDevMenu", "false"}
             };
 
         } // namespace Defaults

@@ -24,6 +24,9 @@ namespace UI {
 
         void OnConfigLoad(const toml::value& data) override {
             std::string cacheDir = toml::find_or<std::string>(data, "CachePath", "AppCache");
+            // 确保读取时处理字符串配置
+            std::string devMenuStr = toml::find_or<std::string>(data, "EnableDevMenu", "false");
+            bool enableDevMenu = (devMenuStr == "true");
             
             // 获取可执行文件目录并设置环境变量
             wchar_t exePath[MAX_PATH];
@@ -36,16 +39,18 @@ namespace UI {
             SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", cachePath.c_str());
             LOGI("Webview") << "WebView2 cache path set to: " << cacheDir;
 
-            // 读取并注入 DevMenu.js
-            std::wstring jsPath = exeDir + L"\\DevMenu.js";
-            std::ifstream jsFile(jsPath);
-            if (jsFile.is_open()) {
-                std::stringstream buffer;
-                buffer << jsFile.rdbuf();
-                WebviewWrapper::GetInstance().InjectJSBeforeLoad(buffer.str());
-                LOGI("Webview") << "DevMenu.js injected successfully.";
-            } else {
-                LOGW("Webview") << "DevMenu.js not found at: " << std::string(jsPath.begin(), jsPath.end());
+            // 仅当启用时读取并注入 DevMenu.js
+            if (enableDevMenu) {
+                std::wstring jsPath = exeDir + L"\\DevMenu.js";
+                std::ifstream jsFile(jsPath);
+                if (jsFile.is_open()) {
+                    std::stringstream buffer;
+                    buffer << jsFile.rdbuf();
+                    WebviewWrapper::GetInstance().InjectJSBeforeLoad(buffer.str());
+                    LOGI("Webview") << "DevMenu.js injected successfully.";
+                } else {
+                    LOGW("Webview") << "DevMenu.js not found at: " << std::string(jsPath.begin(), jsPath.end());
+                }
             }
         }
 
@@ -56,6 +61,9 @@ namespace UI {
             }
             if (!data.contains("CachePath")) {
                 data["CachePath"] = "AppCache";
+            }
+            if (!data.contains("EnableDevMenu")) {
+                data["EnableDevMenu"] = "false";
             }
         }
 
