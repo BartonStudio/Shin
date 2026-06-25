@@ -52,9 +52,14 @@ add_custom_command(TARGET ShinApp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DLLS} "$<TARGET_FILE_DIR:ShinApp>"
 )
 
-# Copy DevMenu.js
+# Copy ShinDevMenu.js
 add_custom_command(TARGET ShinApp POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/web/DevMenu.js" "$<TARGET_FILE_DIR:ShinApp>/DevMenu.js"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/web/ShinDevMenu.js" "$<TARGET_FILE_DIR:ShinApp>/ShinDevMenu.js"
+)
+
+# Copy HAMonitor.js
+add_custom_command(TARGET ShinApp POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/web/HAMonitor.js" "$<TARGET_FILE_DIR:ShinApp>/HAMonitor.js"
 )
 
 # Add integration tests
