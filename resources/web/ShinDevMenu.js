@@ -32,6 +32,16 @@
                 <button onclick="window.Shin.sendDataToCpp(JSON.stringify({action:'ZoomIn'}))">Zoom +</button>
                 <button onclick="window.Shin.sendDataToCpp(JSON.stringify({action:'ZoomOut'}))">Zoom -</button>
                 <button onclick="window.Shin.sendDataToCpp(JSON.stringify({action:'WindowClose'}))">Close App</button>
+                <div style="display: flex; gap: 5px; margin-top: 5px;">
+                    <input type="number" id="w-input" placeholder="W" style="width: 50px;">
+                    <input type="number" id="h-input" placeholder="H" style="width: 50px;">
+                    <button onclick="window.Shin.sendDataToCpp(JSON.stringify({
+                        action: 'WindowSetSize', 
+                        width: parseInt(document.getElementById('w-input').value), 
+                        height: parseInt(document.getElementById('h-input').value),
+                        fixed: false
+                    }))">Resize</button>
+                </div>
                 <input type="text" id="nav-url" placeholder="https://...">
                 <button onclick="window.Shin.sendDataToCpp(JSON.stringify({action:'Navigate', url:document.getElementById('nav-url').value}))">Go</button>
             </div>
