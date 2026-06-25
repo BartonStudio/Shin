@@ -40,16 +40,17 @@ namespace UI {
             LOGI("Webview") << "WebView2 cache path set to: " << cacheDir;
 
             // 仅当启用时读取并注入 DevMenu.js
+            // 仅当启用时读取并注入 ShinDevMenu.js
             if (enableDevMenu) {
-                std::wstring jsPath = exeDir + L"\\DevMenu.js";
+                std::wstring jsPath = exeDir + L"\\ShinDevMenu.js";
                 std::ifstream jsFile(jsPath);
                 if (jsFile.is_open()) {
                     std::stringstream buffer;
                     buffer << jsFile.rdbuf();
                     WebviewWrapper::GetInstance().InjectJSBeforeLoad(buffer.str());
-                    LOGI("Webview") << "DevMenu.js injected successfully.";
+                    LOGI("Webview") << "ShinDevMenu.js injected successfully.";
                 } else {
-                    LOGW("Webview") << "DevMenu.js not found at: " << std::string(jsPath.begin(), jsPath.end());
+                    LOGW("Webview") << "ShinDevMenu.js not found at: " << std::string(jsPath.begin(), jsPath.end());
                 }
             }
         }
