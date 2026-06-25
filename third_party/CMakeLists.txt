@@ -42,3 +42,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/toml11/CMakeLists.txt")
     set(TOML11_BUILD_EXAMPLES OFF CACHE BOOL "Build toml11 examples" FORCE)
     add_subdirectory(toml11)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SQLiteCpp/CMakeLists.txt")
+    set(SQLITECPP_INTERNAL_SQLITE ON CACHE BOOL "" FORCE)
+    add_subdirectory(SQLiteCpp)
+endif()
