@@ -47,3 +47,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SQLiteCpp/CMakeLists.txt")
     set(SQLITECPP_INTERNAL_SQLITE ON CACHE BOOL "" FORCE)
     add_subdirectory(SQLiteCpp)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ixwebsocket/CMakeLists.txt")
+    # For now, configure ixwebsocket as static library and disable TLS/ZLIB to verify basic integration.
+    # We will configure TLS (like MbedTLS or OpenSSL) after verifying basic compilation.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+    set(USE_TLS OFF CACHE BOOL "Enable TLS support" FORCE)
+    set(USE_ZLIB OFF CACHE BOOL "Enable zlib support" FORCE)
+    set(BUILD_DEMO OFF CACHE BOOL "Build demo" FORCE)
+    set(IXWEBSOCKET_INSTALL OFF CACHE BOOL "Install IXWebSocket" FORCE)
+    
+    add_subdirectory(ixwebsocket)
+endif()
+

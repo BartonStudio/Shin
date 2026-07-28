@@ -8,7 +8,7 @@ target_compile_definitions(Core PRIVATE SHIN_CORE_EXPORTS)
 target_compile_features(Core PUBLIC cxx_std_17)
 
 # Link third-party libraries
-target_link_libraries(Core PUBLIC toml11::toml11)
+target_link_libraries(Core PUBLIC toml11::toml11 nlohmann_json::nlohmann_json)
 
 # Add Core submodules
 add_subdirectory(Log)

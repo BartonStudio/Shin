@@ -28,7 +28,10 @@ namespace Shin {
                 {"Webview.CachePath", "AppCache"},
 
                 // 调试菜单开关
-                {"Webview.EnableDevMenu", "false"}
+                {"Webview.EnableDevMenu", "false"},
+
+                // 日历数据库路径
+                {"Calendar.db_path", "memos.db"}
             };
 
         } // namespace Defaults
