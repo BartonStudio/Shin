@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home Assistant WebSocket 控制台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dbe1e9;
+      --accent: #c95b3d;
+      --accent-deep: #a7462d;
+      --green: #277a58;
+      --red: #b42318;
+      --shadow: 0 14px 42px rgba(25, 37, 60, .08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--ink); font: 14px/1.5 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+    button, input, textarea, select { font: inherit; }
+    button { border: 0; border-radius: 9px; padding: 9px 13px; color: #fff; background: var(--accent); cursor: pointer; font-weight: 700; transition: transform .15s ease, background .15s ease, opacity .15s ease; }
+    button:hover:not(:disabled) { background: var(--accent-deep); }
+    button:active:not(:disabled) { transform: scale(.98); }
+    button.secondary { color: var(--ink); background: #edf1f5; }
+    button.secondary:hover:not(:disabled) { background: #dfe6ed; }
+    button.danger { color: #fff; background: var(--red); }
+    button:disabled { cursor: not-allowed; opacity: .52; }
+    input, textarea, select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; color: var(--ink); background: #fff; outline: none; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(201,91,61,.15); }
+    textarea { min-height: 90px; resize: vertical; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+    code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+    .shell { max-width: 1480px; margin: 0 auto; padding: 28px 24px 44px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 22px; }
+    h1 { margin: 0; font-size: 27px; letter-spacing: -.5px; }
+    h2 { margin: 0; font-size: 16px; }
+    .subtitle { margin: 7px 0 0; color: var(--muted); }
+    .connection { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #98a2b3; }
+    .dot.ready { background: var(--green); box-shadow: 0 0 0 4px rgba(39,122,88,.12); }
+    .dot.bad { background: var(--red); }
+    .layout { display: grid; grid-template-columns: minmax(300px, .84fr) minmax(410px, 1.45fr) minmax(330px, .95fr); gap: 18px; align-items: start; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; padding: 17px; background: var(--surface); box-shadow: var(--shadow); }
+    .panel + .panel { margin-top: 18px; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .field { margin-bottom: 12px; }
+    label { display: block; margin: 0 0 5px; color: #344054; font-size: 12px; font-weight: 700; }
+    .hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > * { min-width: 0; }
+    .row.grow > *:first-child { flex: 1; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .check { display: flex; align-items: center; gap: 7px; margin: 0 0 13px; color: var(--muted); font-size: 12px; }
+    .check input { width: auto; }
+    .entity-list { max-height: 480px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+    .entity { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 9px; padding: 10px 11px; color: var(--ink); border-radius: 0; border-bottom: 1px solid #edf0f3; background: #fff; text-align: left; font-weight: 400; }
+    .entity:last-child { border-bottom: 0; }
+    .entity:hover { background: #fff7f3; }
+    .entity.selected { background: #fbe8df; box-shadow: inset 3px 0 0 var(--accent); }
+    .entity-id { font: 12px/1.4 Consolas, "Cascadia Mono", monospace; overflow: hidden; text-overflow: ellipsis; }
+    .entity-name { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .state { padding: 2px 7px; border-radius: 99px; color: #3d4d61; background: #eef2f6; font: 11px Consolas, monospace; }
+    .empty { padding: 22px 14px; color: var(--muted); text-align: center; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .json { max-height: 420px; overflow: auto; margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px; color: #344054; background: var(--surface-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+    .notice { display: none; margin: 0 0 16px; border-radius: 9px; padding: 10px 12px; }
+    .notice.show { display: block; }
+    .notice.ok { color: #155d42; background: #e9f7ef; border: 1px solid #bce6ce; }
+    .notice.warn { color: #8c2d20; background: #fdf0eb; border: 1px solid #f4c9b8; }
+    .sub-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid #edf0f3; }
+    .sub-item:first-child { border-top: 0; }
+    .sub-item code { color: #3d4d61; font-size: 11px; }
+    .response { margin-top: 10px; }
+    @media (max-width: 1120px) { .layout { grid-template-columns: minmax(300px, .9fr) minmax(390px, 1.1fr); } .right-col { grid-column: 1 / -1; } }
+    @media (max-width: 720px) { .shell { padding: 18px 14px 32px; } header { display: block; } .connection { display: inline-flex; margin-top: 14px; } .layout { grid-template-columns: 1fr; } .right-col { grid-column: auto; } .grid-2 { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>Home Assistant WebSocket 控制台</h1>
+        <p class="subtitle">直连 Home Assistant，按需查询实体、调用服务，并订阅事件推送。</p>
+      </div>
+      <div class="connection"><i id="connectionDot" class="dot"></i><span id="connectionText">未连接</span></div>
+    </header>
+
+    <div id="notice" class="notice" aria-live="polite"></div>
+    <section class="layout">
+      <div class="left-col">
+        <section class="panel">
+          <div class="panel-head"><h2>连接配置</h2><span id="serverVersion" class="meta">—</span></div>
+          <div class="field"><label for="baseUrl">Home Assistant 地址</label><input id="baseUrl" placeholder="http://homeassistant.local:8123" autocomplete="url"></div>
+          <div class="field"><label for="accessToken">Long-Lived Access Token</label><textarea id="accessToken" rows="4" placeholder="粘贴访问令牌" autocomplete="off"></textarea></div>
+          <label class="check"><input id="reconnect" type="checkbox" checked> 断线后自动重连</label>
+          <div class="actions"><button id="connect">连接</button><button id="disconnect" class="secondary">断开</button><button id="saveConfig" class="secondary">保存到本地</button><button id="clearConfig" class="danger">清除本地配置</button></div>
+          <p class="hint">令牌将按你的要求保存在浏览器 localStorage；不要在不可信电脑上勾选保存。</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>服务调用 / 设置实体状态</h2></div>
+          <div class="grid-2"><div class="field"><label for="domain">Domain</label><input id="domain" value="light" placeholder="light"></div><div class="field"><label for="service">Service</label><input id="service" value="turn_on" placeholder="turn_on"></div></div>
+          <div class="field"><label for="targetEntity">目标实体 ID</label><input id="targetEntity" placeholder="light.living_room"></div>
+          <div class="field"><label for="serviceData">Service Data（JSON，可空）</label><textarea id="serviceData" placeholder='{"brightness_pct": 60}'></textarea></div>
+          <div class="actions"><button id="callService">调用服务</button><button id="loadServices" class="secondary">获取可用服务</button></div>
+          <p class="hint">Home Assistant 不提供任意“直接改属性”接口；状态与属性由对应 Domain 的 Service 改变，例如 <code>light.turn_on</code> + <code>brightness_pct</code>。</p>
+        </section>
+      </div>
+
+      <div class="center-col">
+        <section class="panel">
+          <div class="panel-head"><h2>实体与属性</h2><span id="entityCount" class="meta">尚未加载</span></div>
+          <div class="row grow" style="margin-bottom:10px"><input id="entityFilter" placeholder="按实体 ID、名称、状态筛选"><button id="refreshEntities" class="secondary">刷新实体</button></div>
+          <div id="entityList" class="entity-list"><div class="empty">连接后点击“刷新实体”获取当前状态。</div></div>
+        </section>
+      </div>
+
+      <div class="right-col">
+        <section class="panel">
+          <div class="panel-head"><h2>选中实体详情</h2><span id="selectedEntity" class="meta">未选择</span></div>
+          <pre id="entityDetail" class="json">选择实体后，这里显示 state、attributes、last_changed 等完整原始属性。</pre>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>订阅</h2><button id="clearSubscriptions" class="secondary">全部取消</button></div>
+          <div class="field"><label for="eventType">事件类型（可空，空表示所有事件）</label><input id="eventType" value="state_changed" placeholder="state_changed"></div>
+          <div class="actions" style="margin-bottom:13px"><button id="subscribeEvent">订阅事件</button><button id="subscribeEntity" class="secondary">订阅选中实体</button></div>
+          <div id="subscriptionList"><div class="empty">暂未建立订阅。</div></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>响应与事件日志</h2><button id="clearLog" class="secondary">清空</button></div>
+          <pre id="log" class="json" aria-live="polite">等待操作。</pre>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="HomeAssistantWs.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

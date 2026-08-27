@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <future>
+#include <optional>
 
 #include <unordered_map>
 
@@ -153,6 +154,72 @@ namespace {
 namespace Shin {
 namespace UI {
 
+#ifdef _WIN32
+    namespace {
+        std::string WideToUtf8(const wchar_t* value) {
+            if (!value) return {};
+            const int length = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+            if (length <= 1) return {};
+            std::string result(length - 1, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), length, nullptr, nullptr);
+            return result;
+        }
+
+        class BrowserExtensionAddedHandler final
+            : public ICoreWebView2ProfileAddBrowserExtensionCompletedHandler {
+        public:
+            BrowserExtensionAddedHandler(std::filesystem::path path,
+                                        WebviewWrapper::BrowserExtensionCallback callback)
+                : m_path(std::move(path)), m_callback(std::move(callback)) {}
+
+            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+                if (!object) return E_POINTER;
+                if (iid == IID_IUnknown || iid == IID_ICoreWebView2ProfileAddBrowserExtensionCompletedHandler) {
+                    *object = static_cast<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler*>(this);
+                    AddRef();
+                    return S_OK;
+                }
+                *object = nullptr;
+                return E_NOINTERFACE;
+            }
+
+            ULONG STDMETHODCALLTYPE AddRef() override { return ++m_referenceCount; }
+            ULONG STDMETHODCALLTYPE Release() override {
+                const ULONG count = --m_referenceCount;
+                if (count == 0) delete this;
+                return count;
+            }
+
+            HRESULT STDMETHODCALLTYPE Invoke(HRESULT errorCode,
+                                             ICoreWebView2BrowserExtension* extension) override {
+                WebviewWrapper::BrowserExtensionResult result;
+                result.path = m_path;
+                result.success = SUCCEEDED(errorCode) && extension;
+                result.hresult = static_cast<std::int32_t>(errorCode);
+
+                if (result.success) {
+                    LPWSTR name = nullptr;
+                    if (SUCCEEDED(extension->get_Name(&name))) {
+                        result.name = WideToUtf8(name);
+                        CoTaskMemFree(name);
+                    }
+                } else {
+                    result.error = "AddBrowserExtension failed with HRESULT 0x" +
+                                   std::to_string(static_cast<unsigned long>(errorCode));
+                }
+
+                if (m_callback) m_callback(result);
+                return S_OK;
+            }
+
+        private:
+            volatile ULONG m_referenceCount = 1;
+            std::filesystem::path m_path;
+            WebviewWrapper::BrowserExtensionCallback m_callback;
+        };
+    }
+#endif
+
     struct WebviewWrapper::Impl {
         bool debug = false;
         void* parentWindow = nullptr;
@@ -163,6 +230,8 @@ namespace UI {
         int width = 800;
         int height = 600;
         int hints = WEBVIEW_HINT_NONE;
+        bool browserExtensionsEnabled = false;
+        std::string additionalBrowserArguments;
         
         struct BindData {
             std::string name;
@@ -207,6 +276,16 @@ namespace UI {
 
     void WebviewWrapper::SetDebug(bool enable) {
         if (!m_impl->isInitialized) m_impl->debug = enable;
+    }
+
+    void WebviewWrapper::SetRemoteDebuggingPort(int port) {
+        if (m_impl->isInitialized) return;
+        m_impl->additionalBrowserArguments.clear();
+        if (port > 0) {
+            // WebView2 binds the CDP endpoint to loopback (localhost) by default.
+            m_impl->additionalBrowserArguments =
+                "--remote-debugging-port=" + std::to_string(port);
+        }
     }
 
     void WebviewWrapper::SetParentWindow(void* hwnd) {
@@ -264,6 +343,12 @@ namespace UI {
         }
     }
 
+    void WebviewWrapper::SetBrowserExtensionsEnabled(bool enable) {
+        if (!m_impl->isInitialized) {
+            m_impl->browserExtensionsEnabled = enable;
+        }
+    }
+
     void WebviewWrapper::SetSize(int width, int height, bool fixed) {
         m_impl->width = width;
         m_impl->height = height;
@@ -287,7 +372,10 @@ namespace UI {
         if (m_impl->isInitialized) return true;
 
         try {
-            m_impl->w = std::make_unique<webview::webview>(m_impl->debug, m_impl->parentWindow);
+            m_impl->w = std::make_unique<webview::webview>(
+                m_impl->debug, m_impl->parentWindow,
+                m_impl->browserExtensionsEnabled,
+                m_impl->additionalBrowserArguments);
             m_impl->uiThreadId = std::this_thread::get_id();
 
             m_impl->w->set_title(m_impl->title);
@@ -385,7 +473,80 @@ namespace UI {
         return nullptr;
     }
 
+    bool WebviewWrapper::AddBrowserExtension(
+        const std::filesystem::path& extensionPath,
+        BrowserExtensionCallback callback) {
+        if (!m_impl->isInitialized || !m_impl->w || !m_impl->browserExtensionsEnabled) {
+            if (callback) {
+                callback({false, extensionPath, {}, 0,
+                          "Browser extensions must be enabled before Initialize"});
+            }
+            return false;
+        }
 
+        if (std::this_thread::get_id() != m_impl->uiThreadId) {
+            m_impl->w->dispatch([this, extensionPath, callback]() {
+                AddBrowserExtension(extensionPath, callback);
+            });
+            return true;
+        }
+
+        const auto manifestPath = extensionPath / "manifest.json";
+        if (!std::filesystem::is_directory(extensionPath) ||
+            !std::filesystem::is_regular_file(manifestPath)) {
+            if (callback) {
+                callback({false, extensionPath, {}, 0,
+                          "Extension directory must contain a top-level manifest.json"});
+            }
+            LOGE("Webview") << "Invalid browser extension directory: " << extensionPath.string();
+            return false;
+        }
+
+#ifdef _WIN32
+        auto controller = static_cast<ICoreWebView2Controller*>(GetNativeController());
+        if (!controller) {
+            if (callback) callback({false, extensionPath, {}, 0, "ICoreWebView2Controller is unavailable"});
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ICoreWebView2> webview;
+        Microsoft::WRL::ComPtr<ICoreWebView2_13> webview13;
+        Microsoft::WRL::ComPtr<ICoreWebView2Profile> profile;
+        Microsoft::WRL::ComPtr<ICoreWebView2Profile7> profile7;
+
+        HRESULT result = controller->get_CoreWebView2(&webview);
+        if (SUCCEEDED(result)) result = webview.As(&webview13);
+        if (SUCCEEDED(result)) result = webview13->get_Profile(&profile);
+        if (SUCCEEDED(result)) result = profile.As(&profile7);
+        if (FAILED(result)) {
+            if (callback) {
+                callback({false, extensionPath, {}, static_cast<std::int32_t>(result),
+                          "WebView2 Runtime does not support the Browser Extensions API"});
+            }
+            LOGE("Webview") << "Browser Extensions API unavailable, HRESULT="
+                            << static_cast<long>(result);
+            return false;
+        }
+
+        const std::wstring absolutePath = std::filesystem::absolute(extensionPath).wstring();
+        auto* handler = new BrowserExtensionAddedHandler(extensionPath, callback);
+        result = profile7->AddBrowserExtension(absolutePath.c_str(), handler);
+        if (FAILED(result)) {
+            handler->Release();
+            if (callback) {
+                callback({false, extensionPath, {}, static_cast<std::int32_t>(result),
+                          "AddBrowserExtension request was rejected"});
+            }
+            LOGE("Webview") << "AddBrowserExtension request failed for "
+                            << extensionPath.string() << ", HRESULT=" << static_cast<long>(result);
+            return false;
+        }
+        return true;
+#else
+        if (callback) callback({false, extensionPath, {}, 0, "Browser extensions are supported only on Windows/WebView2"});
+        return false;
+#endif
+    }
 
     void WebviewWrapper::RunBlocking() {
         if (m_impl->isInitialized && m_impl->w) {

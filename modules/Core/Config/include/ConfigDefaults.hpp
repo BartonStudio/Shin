@@ -30,6 +30,12 @@ namespace Shin {
                 // 调试菜单开关
                 {"Webview.EnableDevMenu", "false"},
 
+                // Browser extension switch (extension paths are module-owned configuration).
+                {"Webview.BrowserExtensionsEnabled", "false"},
+
+                // 远程调试端口（0 = 关闭；>0 = 在 127.0.0.1:<port> 开启 CDP 远程调试）
+                {"Webview.RemoteDebuggingPort", "0"},
+
                 // 日历数据库路径
                 {"Calendar.db_path", "memos.db"}
             };

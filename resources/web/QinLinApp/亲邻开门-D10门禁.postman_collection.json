@@ -1,0 +1,514 @@
+{
+  "info": {
+    "name": "亲邻开门-富力桃园D区",
+    "description": "亲邻开门完整链路（2026-08-09 更新）：\n1) 短信：gateway2 + header sign\n2) 登录：mobileapi3 /api/app/v1/login（AES mobile + body sign）→ 自动写回 sessionId\n3) 开门：mobileapi3 /api/open/doorcontrol/v2/open（自动 timestamp/nonce/sign）\nsessionId 失效后重新跑短信→登录即可，无需抓包。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://mobileapi3.qinlinkeji.com"
+    },
+    {
+      "key": "smsBaseUrl",
+      "value": "https://gateway2.qinlinkeji.com"
+    },
+    {
+      "key": "sessionId",
+      "value": "app:8a81818b9f26b081019fe55f001f7b89"
+    },
+    {
+      "key": "communityId",
+      "value": "4222"
+    },
+    {
+      "key": "mobile",
+      "value": "18211576983"
+    },
+    {
+      "key": "smsCode",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const q = pm.request.url.query;",
+          "const dcid = q.get(\"doorControlId\");",
+          "if (!dcid) { return; } // 非开门请求（短信/登录）跳过自动开门签名",
+          "const sessionId = pm.collectionVariables.get(\"sessionId\");",
+          "const communityId = pm.collectionVariables.get(\"communityId\");",
+          "const ts = Date.now().toString();",
+          "const nonce = Math.floor(Math.random() * 100000).toString().padStart(5, \"0\");",
+          "const raw = \"appChannel=1&communityId=\" + communityId + \"&doorControlId=\" + dcid + \"&nonce=\" + nonce + \"&timestamp=\" + ts + \"&token=\" + sessionId + \"&version=5.2.1&key=qiAnlPinP\";",
+          "const sign = CryptoJS.MD5(raw).toString().toUpperCase();",
+          "q.upsert({ key: \"sessionId\", value: sessionId });",
+          "q.upsert({ key: \"timestamp\", value: ts });",
+          "q.upsert({ key: \"nonce\", value: nonce });",
+          "q.upsert({ key: \"sign\", value: sign });"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "登录-获取短信验证码",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const appid = \"gbDjIZQSOpCMX49P\";",
+              "const appsecret = \"OKFoQ9MmNXQtcyXROo4PnaFkfDPTHuDg\";",
+              "let body = {};",
+              "try { body = JSON.parse(pm.request.body.raw); } catch (e) {}",
+              "const mobile = String(body.mobile || pm.collectionVariables.get(\"mobile\") || \"\");",
+              "if (!mobile) { throw new Error(\"请设置 collection 变量 mobile 或 body.mobile\"); }",
+              "body.mobile = mobile;",
+              "pm.request.body.raw = JSON.stringify(body);",
+              "const nonce = Math.floor(Math.random() * 10000).toString().padStart(4, \"0\");",
+              "const timestamp = Date.now().toString();",
+              "const values = { appid, mobile, nonce, timestamp, version: \"v2\" };",
+              "const raw = Object.keys(values).sort().map(key => key + \"=\" + values[key]).join(\"&\") + \"&appsecret=\" + appsecret;",
+              "pm.request.headers.upsert({ key: \"appid\", value: appid });",
+              "pm.request.headers.upsert({ key: \"nonce\", value: nonce });",
+              "pm.request.headers.upsert({ key: \"timestamp\", value: timestamp });",
+              "pm.request.headers.upsert({ key: \"version\", value: \"v2\" });",
+              "pm.request.headers.upsert({ key: \"sign\", value: CryptoJS.MD5(raw).toString().toUpperCase() });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "user-agent",
+            "value": "Dart/3.10 (dart:io)"
+          },
+          {
+            "key": "qversioncode",
+            "value": "3141"
+          },
+          {
+            "key": "accept-encoding",
+            "value": "gzip"
+          },
+          {
+            "key": "qchannel",
+            "value": "xiaomi"
+          },
+          {
+            "key": "qplatform",
+            "value": "0"
+          },
+          {
+            "key": "qvendor",
+            "value": "OnePlus"
+          },
+          {
+            "key": "openid",
+            "value": ""
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=utf-8"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobile\": \"{{mobile}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{smsBaseUrl}}/member/sms/sendSecurityCode",
+          "host": [
+            "{{smsBaseUrl}}"
+          ],
+          "path": [
+            "member",
+            "sms",
+            "sendSecurityCode"
+          ]
+        },
+        "description": "发短信（已验证）。\nPOST https://gateway2.qinlinkeji.com/member/sms/sendSecurityCode\nbody: {\"mobile\": \"...\"}\nheaders 自动：appid/nonce/timestamp/version/sign（Encryption.getHeaderSign）\n限制：每天最多 5 次，验证码 5 分钟有效，60 秒重发。"
+      }
+    },
+    {
+      "name": "登录-手机号验证码",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// mobileapi 真登录：AES-128-ECB(mobile).hex.upper + qapp body sign",
+              "const AES_KEY_HEX = \"FBC213C4C7BEEBD2AA4EDBF0F681C41B\";",
+              "const APP_VERSION = \"5.2.1\";",
+              "const mobile = String(pm.collectionVariables.get(\"mobile\") || \"\");",
+              "const smsCode = String(pm.collectionVariables.get(\"smsCode\") || \"\");",
+              "if (!/^1[3-9]\\d{9}$/.test(mobile)) { throw new Error(\"请在 collection 变量 mobile 填 11 位手机号\"); }",
+              "if (!smsCode) { throw new Error(\"请在 collection 变量 smsCode 填刚收到的验证码\"); }",
+              "",
+              "// AES-128-ECB-PKCS7 → ciphertext 大写 hex（等价 flutter_aes_ecb_pkcs5）",
+              "const key = CryptoJS.enc.Hex.parse(AES_KEY_HEX);",
+              "const encrypted = CryptoJS.AES.encrypt(mobile, key, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 });",
+              "const mobileHex = encrypted.ciphertext.toString().toUpperCase();",
+              "",
+              "const body = {",
+              "  mobile: mobileHex,",
+              "  smsCode: smsCode,",
+              "  appChannel: 2,",
+              "  timestamp: Date.now().toString(),",
+              "  version: APP_VERSION,",
+              "  nonce: Math.floor(Math.random() * 100000).toString().padStart(5, \"0\")",
+              "};",
+              "// 未登录不带 token；sign = MD5(字典序 k=v & ... &key=qiAnlPinP).upper",
+              "const signMap = {};",
+              "Object.keys(body).forEach(k => { signMap[k] = String(body[k]); });",
+              "const raw = Object.keys(signMap).sort().map(k => k + \"=\" + signMap[k]).join(\"&\") + \"&key=qiAnlPinP\";",
+              "body.sign = CryptoJS.MD5(raw).toString().toUpperCase();",
+              "pm.request.body.raw = JSON.stringify(body);",
+              "console.log(\"login mobile(AES-hex)=\", mobileHex);",
+              "console.log(\"login sign raw=\", raw);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "try {",
+              "  const j = pm.response.json();",
+              "  let sid = null;",
+              "  if (j && j.data) {",
+              "    if (typeof j.data === \"string\" && j.data.indexOf(\"app:\") === 0) sid = j.data;",
+              "    else if (j.data.sessionId) sid = j.data.sessionId;",
+              "    else if (j.data.token) sid = j.data.token;",
+              "  }",
+              "  if (!sid) {",
+              "    const m = pm.response.text().match(/app:[0-9a-fA-F]{32}/);",
+              "    if (m) sid = m[0];",
+              "  }",
+              "  if (sid) {",
+              "    pm.collectionVariables.set(\"sessionId\", sid);",
+              "    console.log(\"OK sessionId written back:\", sid);",
+              "  } else {",
+              "    console.log(\"no sessionId, code=\", j && j.code, \"message=\", j && j.message);",
+              "  }",
+              "} catch (e) { console.log(\"parse login response failed\", e); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "user-agent",
+            "value": "Dart/3.10 (dart:io)"
+          },
+          {
+            "key": "qversioncode",
+            "value": "3141"
+          },
+          {
+            "key": "accept-encoding",
+            "value": "gzip"
+          },
+          {
+            "key": "qchannel",
+            "value": "xiaomi"
+          },
+          {
+            "key": "qplatform",
+            "value": "0"
+          },
+          {
+            "key": "qvendor",
+            "value": "OnePlus"
+          },
+          {
+            "key": "openid",
+            "value": ""
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=utf-8"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobile\": \"(auto AES hex)\",\n  \"smsCode\": \"{{smsCode}}\",\n  \"appChannel\": 2\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/app/v1/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "app",
+            "v1",
+            "login"
+          ]
+        },
+        "description": "真登录接口（2026-08-09 已验证）。\nPOST https://mobileapi3.qinlinkeji.com/api/app/v1/login\n\n注意：不要用 qapp.qinlinkeji.com/app/api/app/v1/login，那会固定返回 code=4「用户没有绑定」。\n\n用法：\n1) 先跑「登录-获取短信验证码」\n2) 把收到的验证码填到 collection 变量 smsCode\n3) 确认 collection 变量 mobile 是 11 位手机号\n4) 发送本请求；成功后 Tests 会自动把 sessionId 写回 collection 变量\n\nbody 自动生成：\n- mobile = AES-128-ECB-PKCS5(明文手机号, key=hex FBC213...).upperHex\n- smsCode / appChannel=2\n- timestamp / version=5.2.1 / nonce / sign（_QappEncrypt，盐 key=qiAnlPinP）"
+      }
+    },
+    {
+      "name": "开门-D10大堂",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "user-agent",
+            "value": "Dart/3.10 (dart:io)"
+          },
+          {
+            "key": "qversioncode",
+            "value": "3141"
+          },
+          {
+            "key": "qchannel",
+            "value": "xiaomi"
+          },
+          {
+            "key": "qplatform",
+            "value": "0"
+          },
+          {
+            "key": "qvendor",
+            "value": "OnePlus"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=utf-8"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/open/doorcontrol/v2/open?sessionId=app:8a8181909f26b1e7019fe53b766d783a&appChannel=1&doorControlId=16708&communityId={{communityId}}&timestamp=0&version=5.2.1&nonce=0&sign=0",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "open",
+            "doorcontrol",
+            "v2",
+            "open"
+          ],
+          "query": [
+            {
+              "key": "sessionId",
+              "value": "{{sessionId}}"
+            },
+            {
+              "key": "appChannel",
+              "value": "1"
+            },
+            {
+              "key": "doorControlId",
+              "value": "16708",
+              "description": "D10大堂"
+            },
+            {
+              "key": "communityId",
+              "value": "{{communityId}}"
+            },
+            {
+              "key": "timestamp",
+              "value": "1786257932020"
+            },
+            {
+              "key": "version",
+              "value": "5.2.1"
+            },
+            {
+              "key": "nonce",
+              "value": "22243"
+            },
+            {
+              "key": "sign",
+              "value": "1A76B77CE62FDA9C494779E92ECC7F37"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "开门-D10负一1",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "user-agent",
+            "value": "Dart/3.10 (dart:io)"
+          },
+          {
+            "key": "qversioncode",
+            "value": "3141"
+          },
+          {
+            "key": "qchannel",
+            "value": "xiaomi"
+          },
+          {
+            "key": "qplatform",
+            "value": "0"
+          },
+          {
+            "key": "qvendor",
+            "value": "OnePlus"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=utf-8"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/open/doorcontrol/v2/open?sessionId={{sessionId}}&appChannel=1&doorControlId=16709&communityId={{communityId}}&timestamp=0&version=5.2.1&nonce=0&sign=0",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "open",
+            "doorcontrol",
+            "v2",
+            "open"
+          ],
+          "query": [
+            {
+              "key": "sessionId",
+              "value": "{{sessionId}}"
+            },
+            {
+              "key": "appChannel",
+              "value": "1"
+            },
+            {
+              "key": "doorControlId",
+              "value": "16709",
+              "description": "D10负一1"
+            },
+            {
+              "key": "communityId",
+              "value": "{{communityId}}"
+            },
+            {
+              "key": "timestamp",
+              "value": "0"
+            },
+            {
+              "key": "version",
+              "value": "5.2.1"
+            },
+            {
+              "key": "nonce",
+              "value": "0"
+            },
+            {
+              "key": "sign",
+              "value": "0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "开门-D12手动推拉门",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "user-agent",
+            "value": "Dart/3.10 (dart:io)"
+          },
+          {
+            "key": "qversioncode",
+            "value": "3141"
+          },
+          {
+            "key": "qchannel",
+            "value": "xiaomi"
+          },
+          {
+            "key": "qplatform",
+            "value": "0"
+          },
+          {
+            "key": "qvendor",
+            "value": "OnePlus"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=utf-8"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/open/doorcontrol/v2/open?sessionId={{sessionId}}&appChannel=1&doorControlId=16671&communityId={{communityId}}&timestamp=0&version=5.2.1&nonce=0&sign=0",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "open",
+            "doorcontrol",
+            "v2",
+            "open"
+          ],
+          "query": [
+            {
+              "key": "sessionId",
+              "value": "{{sessionId}}"
+            },
+            {
+              "key": "appChannel",
+              "value": "1"
+            },
+            {
+              "key": "doorControlId",
+              "value": "16671",
+              "description": "D12手动推拉门"
+            },
+            {
+              "key": "communityId",
+              "value": "{{communityId}}"
+            },
+            {
+              "key": "timestamp",
+              "value": "0"
+            },
+            {
+              "key": "version",
+              "value": "5.2.1"
+            },
+            {
+              "key": "nonce",
+              "value": "0"
+            },
+            {
+              "key": "sign",
+              "value": "0"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

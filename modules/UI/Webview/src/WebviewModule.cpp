@@ -5,7 +5,12 @@
 #include <Config.hpp>
 #include <IConfigurable.hpp>
 #include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <memory>
+#include <sstream>
+#include <vector>
 #include <windows.h>
 
 namespace Shin {
@@ -27,6 +32,19 @@ namespace UI {
             // 确保读取时处理字符串配置
             std::string devMenuStr = toml::find_or<std::string>(data, "EnableDevMenu", "false");
             bool enableDevMenu = (devMenuStr == "true");
+            std::string extensionsEnabledStr =
+                toml::find_or<std::string>(data, "BrowserExtensionsEnabled", "false");
+            m_browserExtensionsEnabled = (extensionsEnabledStr == "true");
+            m_browserExtensionPaths.clear();
+            if (data.contains("BrowserExtensionPaths")) {
+                try {
+                    m_browserExtensionPaths = toml::get<std::vector<std::string>>(
+                        data.at("BrowserExtensionPaths"));
+                } catch (const std::exception& exception) {
+                    LOGE("Webview") << "BrowserExtensionPaths must be a string array: "
+                                     << exception.what();
+                }
+            }
             
             // 获取可执行文件目录并设置环境变量
             wchar_t exePath[MAX_PATH];
@@ -55,6 +73,11 @@ namespace UI {
             }
         }
 
+    private:
+        bool m_browserExtensionsEnabled = false;
+        std::vector<std::string> m_browserExtensionPaths;
+
+    public:
         void OnConfigSave(toml::value& data) const override {
             // 确保 data 是 table 类型
             if (!data.is_table()) {
@@ -65,6 +88,15 @@ namespace UI {
             }
             if (!data.contains("EnableDevMenu")) {
                 data["EnableDevMenu"] = "false";
+            }
+            if (!data.contains("BrowserExtensionsEnabled")) {
+                data["BrowserExtensionsEnabled"] = "false";
+            }
+            if (!data.contains("BrowserExtensionPaths")) {
+                data["BrowserExtensionPaths"] = toml::array{};
+            }
+            if (!data.contains("RemoteDebuggingPort")) {
+                data["RemoteDebuggingPort"] = "0";
             }
         }
 
@@ -82,7 +114,10 @@ namespace UI {
             int width = std::stoi(config.GetValue("Webview.window_width", "1280"));
             int height = std::stoi(config.GetValue("Webview.window_height", "720"));
             bool isFrameless = config.GetValue("Webview.frameless", "true") == "true";
-            
+
+            LOGI("Webview") << "Window: " << appName << " " << width << "x" << height
+                            << " frameless=" << (isFrameless ? "true" : "false");
+
             // 注册开发工具菜单相关 Action (复用内置的 WindowClose, WindowOpenDevTools)
             UI::WebviewMessageHandler::RegisterAction("ZoomIn", [](const nlohmann::json&, nlohmann::json, auto) {
                 WebviewWrapper::GetInstance().ExecuteJS("document.body.style.zoom = (parseFloat(getComputedStyle(document.body).zoom) || 1) + 0.1;");
@@ -95,6 +130,21 @@ namespace UI {
             webview.SetTitle(appName);
             webview.SetSize(width, height, false);
             webview.SetDebug(true);
+            webview.SetBrowserExtensionsEnabled(m_browserExtensionsEnabled);
+
+            // 远程调试：仅当配置了有效端口（>0）时开启，绑定 127.0.0.1 回环地址
+            int remoteDebuggingPort = 0;
+            try {
+                remoteDebuggingPort =
+                    std::stoi(config.GetValue("Webview.RemoteDebuggingPort", "0"));
+            } catch (...) {
+                remoteDebuggingPort = 0;
+            }
+            webview.SetRemoteDebuggingPort(remoteDebuggingPort);
+            if (remoteDebuggingPort > 0) {
+                LOGI("Webview") << "Remote debugging enabled on http://127.0.0.1:"
+                                << remoteDebuggingPort;
+            }
 
             // 3. Initialize Native Webview
             if (!webview.Initialize()) {
@@ -115,10 +165,52 @@ namespace UI {
                 }
             }
 
-            // 4. Navigate to Startup URL
-            std::string startupUrl = config.GetValue("Webview.startup_url", "http://localhost:8080");
-            webview.Navigate(startupUrl);
-            LOGI("Webview") << "Navigating to: " << startupUrl;
+            // 4. Install configured extensions before the first page navigation.
+            const std::string startupUrl = config.GetValue("Webview.startup_url", "http://localhost:8080");
+            auto navigateStartup = [startupUrl, &webview]() {
+                webview.Navigate(startupUrl);
+                LOGI("Webview") << "Navigating to: " << startupUrl;
+            };
+
+            if (!m_browserExtensionsEnabled || m_browserExtensionPaths.empty()) {
+                navigateStartup();
+            } else {
+                wchar_t executablePath[MAX_PATH]{};
+                GetModuleFileNameW(nullptr, executablePath, MAX_PATH);
+                const std::filesystem::path executableDirectory =
+                    std::filesystem::path(executablePath).parent_path();
+                auto pendingInstallations = std::make_shared<std::atomic<size_t>>(0);
+
+                for (const auto& configuredPath : m_browserExtensionPaths) {
+                    std::filesystem::path extensionPath(configuredPath);
+                    if (extensionPath.is_relative()) {
+                        extensionPath = executableDirectory / extensionPath;
+                    }
+                    ++(*pendingInstallations);
+                    const bool submitted = webview.AddBrowserExtension(
+                        extensionPath,
+                        [extensionPath, pendingInstallations, navigateStartup](
+                            const WebviewWrapper::BrowserExtensionResult& result) {
+                            if (result.success) {
+                                LOGI("Webview") << "Browser extension installed: "
+                                                 << extensionPath.string()
+                                                 << (result.name.empty() ? "" : " (" + result.name + ")");
+                            } else {
+                                LOGE("Webview") << "Browser extension failed: "
+                                                 << extensionPath.string()
+                                                 << ", HRESULT=" << result.hresult
+                                                 << ", " << result.error;
+                            }
+                            if (--(*pendingInstallations) == 0) {
+                                navigateStartup();
+                            }
+                        });
+                    if (!submitted) {
+                        LOGE("Webview") << "Browser extension installation was not submitted: "
+                                         << extensionPath.string();
+                    }
+                }
+            }
 
             // 5. Inject Log Listener BEFORE page load
             webview.InjectJSBeforeLoad(

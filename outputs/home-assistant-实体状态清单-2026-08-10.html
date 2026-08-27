@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Assistant 关注设备清单</title>
+<style>
+:root {
+  color-scheme: light;
+  --ink: #17202b;
+  --muted: #6b7685;
+  --line: #dfe5ec;
+  --panel: #ffffff;
+  --page: #f5f7fa;
+  --accent: #2d6cdf;
+  --soft: #edf4ff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font-family: system-ui, "Microsoft YaHei", sans-serif; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 36px 24px 56px; }
+header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: -0.04em; }
+.subtitle { margin: 0; color: var(--muted); line-height: 1.7; }
+.badge { flex: 0 0 auto; border: 1px solid #c9d9f6; background: var(--soft); color: #2458a8; border-radius: 999px; padding: 8px 14px; font-size: 13px; }
+.note { margin: 22px 0; padding: 16px 18px; background: #fffdf5; border: 1px solid #eadca9; border-radius: 12px; color: #665524; line-height: 1.7; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 22px 0 12px; }
+input, select, button { font: inherit; border: 1px solid #bdc8d5; border-radius: 8px; padding: 9px 12px; background: #fff; color: var(--ink); }
+input { min-width: 280px; }
+button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; }
+button.secondary { background: #fff; color: #2458a8; border-color: #b9cdeb; }
+.count { margin-left: auto; color: var(--muted); font-size: 14px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px; }
+th, td { padding: 14px 15px; text-align: left; vertical-align: top; border-bottom: 1px solid #e9edf2; }
+th { background: #f8fafc; color: #465466; font-weight: 650; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.category { color: #2458a8; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.name { font-weight: 650; margin-top: 4px; }
+.pending { color: #9a6a0a; background: #fff8df; border-radius: 999px; padding: 4px 9px; display: inline-block; font-size: 12px; white-space: nowrap; }
+code { color: #315b91; background: #f1f5fa; border-radius: 5px; padding: 2px 5px; }
+footer { margin-top: 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+@media (max-width: 720px) {
+  .wrap { padding: 24px 14px 40px; }
+  header { display: block; }
+  .badge { display: inline-block; margin-top: 16px; }
+  .count { margin-left: 0; width: 100%; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div>
+      <h1>Home Assistant 关注设备清单</h1>
+      <p class="subtitle">已从 Home Assistant 实例读取 576 个实体，并仅记录名称与功能能够明确对应的主控实体。</p>
+    </div>
+    <div class="badge">已匹配 22 / 22 项</div>
+  </header>
+
+  <section class="note">
+    全部 22 项均已匹配。阳台灯即捷纳森晾衣架自带照明（light.jns_cn_742725975_1_s_3_light）；次卧空调实际接入名为“书房空调”（climate.211106248928750_climate）。状态均为本次实时读取。
+  </section>
+
+  <div class="toolbar">
+    <input id="query" type="search" placeholder="搜索名称、类别或备注">
+    <select id="category"><option value="">全部类别</option></select>
+    <button id="showPending">只看待匹配</button>
+    <button class="secondary" id="showAll">显示全部</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>类别</th>
+          <th>关注设备</th>
+          <th>品牌 / 类型</th>
+          <th>Home Assistant 实体 ID</th>
+          <th>当前状态</th>
+          <th>重点属性 / 控制需求</th>
+          <th>备注</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    各项均可订阅 <code>state_changed</code>，并使用对应域的标准服务控制：<code>light.turn_on/off</code>、<code>switch.turn_on/off</code>、<code>cover.open_cover/close_cover/stop_cover/set_cover_position</code>、<code>select.select_option</code> 与 <code>number.set_value</code>。
+  </footer>
+</main>
+<script>
+const items = [
+  { category: "灯光", name: "客厅吸顶灯", type: "lipro", entity: "light.lipro_cn_825234801_23x1_s_2_light", state: "on", attrs: "亮度 255；色温 4812 K；效果：护眼、明亮、夜灯、母婴", note: "可用 light.turn_on / turn_off" },
+  { category: "灯光", name: "书房吸顶灯", type: "lipro", entity: "light.lipro_cn_827642669_23x1_s_2_light", state: "on", attrs: "亮度 255；色温 4695 K；支持 color_temp", note: "可用 light.turn_on / turn_off" },
+  { category: "灯光", name: "餐桌灯", type: "米家双键开关", entity: "switch.xiaomi_cn_945835840_w2_on_p_3_1", state: "off", attrs: "开 / 关；当前为关闭", note: "可用 switch.turn_on / turn_off" },
+  { category: "灯光", name: "厨房灯", type: "米家双键开关", entity: "switch.xiaomi_cn_945835840_w2_on_p_2_1", state: "off", attrs: "开 / 关；当前为关闭", note: "可用 switch.turn_on / turn_off" },
+  { category: "灯光", name: "厕所灯", type: "cuco 开关（洗手间筒灯）", entity: "switch.cuco_cn_958767544_v3_on_p_2_1", state: "off", attrs: "开 / 关；当前关闭；支持倒计时关闭、循环任务等扩展功能", note: "用户确认“洗手间筒灯”即厕所灯；可用 switch.turn_on / turn_off" },
+  { category: "灯光", name: "阳台灯", type: "晾衣架自带照明（捷纳森）", entity: "light.jns_cn_742725975_1_s_3_light", state: "off", attrs: "仅开 / 关（onoff 模式），无亮度调节", note: "用户确认阳台灯即阳台电动晾衣架上的灯光；可用 light.turn_on / turn_off" },
+  { category: "灯光", name: "客厅灯带", type: "Aqara 灯带（Dimmer Lightbulb）", entity: "light.dimmer_lightbulb", state: "off", attrs: "开 / 关、亮度、色温；色温范围 2702–6535 K；无 RGB 彩色，仅 color_temp 模式", note: "Aqara-LED-Strip 经 Aqara 网关接入；可用 light.turn_on / turn_off（brightness、color_temp 参数）" },
+  { category: "灯光", name: "入户门筒灯", type: "米家单键开关", entity: "switch.xiaomi_cn_946937018_w1_on_p_2_1", state: "off", attrs: "开 / 关；当前关闭；设备温度 32 °C；功能异常：无故障", note: "可用 switch.turn_on / turn_off；button.xiaomi_cn_946937018_w1_toggle_a_2_1 为状态切换按钮，不作为主控实体" },
+  { category: "灯光", name: "洗手台筒灯", type: "米家双键开关（书房外）", entity: "switch.xiaomi_cn_888424211_w2_on_p_3_1", state: "off", attrs: "开 / 关；当前关闭", note: "可用 switch.turn_on / turn_off；与“洗手间筒灯”（厕所灯）是两个不同开关" },
+  { category: "空调", name: "客厅风管机", type: "climate", entity: "climate.210006736858296_climate", state: "cool", attrs: "当前制冷；设定温度 28.0 °C；室温 28.5 °C；风速支持 silent / low / medium / high / full / auto；支持自动、制冷、除湿、制热、仅送风", note: "可用 climate.set_hvac_mode / set_temperature / set_fan_mode / set_preset_mode / set_swing_mode" },
+  { category: "空调", name: "主卧空调", type: "climate", entity: "climate.210006736740521_climate", state: "cool", attrs: "当前制冷；设定温度 26.0 °C；室温 33.8 °C；风速支持 silent / low / medium / high / full / auto；支持自动、制冷、除湿、制热、仅送风", note: "可用 climate.set_hvac_mode / set_temperature / set_fan_mode / set_preset_mode / set_swing_mode" },
+  { category: "空调", name: "次卧空调", type: "climate（HA 中名为“书房空调”）", entity: "climate.211106248928750_climate", state: "off", attrs: "当前关闭；设定温度 26.5 °C；室温 32.4 °C；风速 silent / low / medium / high / full / auto；支持自动、制冷、除湿、制热、仅送风；摆风支持上下 / 左右 / 同时；预设含 comfort / eco / boost / sleep / away", note: "用户确认次卧空调即 HA 中的“书房空调”；可用 climate.set_hvac_mode / set_temperature / set_fan_mode / set_preset_mode / set_swing_mode" },
+  { category: "音箱", name: "厕所小爱音箱 Pro", type: "小爱音箱 Pro", entity: "media_player.xiaomi_cn_800174203_lx06", state: "unavailable", attrs: "主音箱实体当前不可用；播放状态：停止；麦克风静音：关闭；睡眠模式：开启", note: "播放：button.xiaomi_cn_800174203_lx06_play_a_3_1；暂停：button.xiaomi_cn_800174203_lx06_pause_a_3_2；上一首 / 下一首：对应 button；文本播报：notify.xiaomi_cn_800174203_lx06_play_text_a_5_1" },
+  { category: "音箱", name: "客厅小爱 Sound 2 Max", type: "Xiaomi Sound 2 Max", entity: "media_player.xiaomi_cn_935443905_oh1m", state: "idle", attrs: "当前空闲；音量约 54.7%；麦克风静音：关闭；睡眠模式：开启；勿扰：开启", note: "播放音乐 / 电台 / 唤醒 / 停止闹钟等 button；文本播报：notify.xiaomi_cn_935443905_oh1m_play_text_a_7_3；麦克风：switch.xiaomi_cn_935443905_oh1m_mute_p_4_1" },
+  { category: "家电", name: "宠物饮水机", type: "小米智能宠物饮水机 2", entity: "select.xiaomi_cn_2087144691_70m2_mode_p_2_4", state: "感应出水", attrs: "模式：感应、间歇、长出水；缺水、低电量、水泵堵转均为否", note: "主模式可用 select.select_option；出水间隔为 number.xiaomi_cn_2087144691_70m2_out_water_interval_p_2_7" },
+  { category: "家电", name: "鱼缸", type: "米家智能鱼缸", entity: "switch.hfjh_cn_2005062044_m100_on_p_2_1", state: "on", attrs: "水泵开启，一挡；主灯关闭；提示音开启；温度提醒范围 21-28 °C", note: "主开关可用 switch.turn_on / turn_off" },
+  { category: "家电", name: "电动晾衣架", type: "捷纳森智能晾衣架", entity: "cover.jns_cn_742725975_1_s_2_airer", state: "unknown", attrs: "支持升 / 降、停止；模式为 Auto；UV、照明均关闭；风干、烘干、消毒剩余时间均为 0 分钟", note: "可用 cover 服务；设备未回传当前位置" },
+  { category: "通风", name: "厕所排气扇", type: "米家开关", entity: "switch.cuco_cn_959248857_v3_on_p_2_1", state: "off", attrs: "当前关闭；实时功率 0 W；累计电量 0 kWh；设备温度 45 °C；倒计时剩余 0 分钟", note: "可用 switch.turn_on / turn_off" },
+  { category: "遮阳 / 窗帘", name: "书房蜂巢帘", type: "杜亚电机控制器", entity: "cover.dooya_cn_1165747759_lidian_s_2_motor_controller", state: "open", attrs: "当前位置 100%；支持开、关、停止、设定位置", note: "可用 cover 服务" },
+  { category: "遮阳 / 窗帘", name: "书房窗帘", type: "书房窗户电动帘", entity: "cover.xijia1_cn_793216227_c9_s_2_curtain", state: "open", attrs: "当前位置 97%；支持开、关、停止、设定位置", note: "已按名称匹配为书房窗户电动帘" },
+  { category: "遮阳 / 窗帘", name: "主卧布帘", type: "窗帘电机", entity: "cover.xijia1_cn_793205358_c9_s_2_curtain", state: "open（2%）", attrs: "当前位置 2%；支持开、关、停止、设定位置", note: "主页快捷控制独立操作布帘" },
+  { category: "遮阳 / 窗帘", name: "主卧纱帘", type: "窗帘电机", entity: "cover.xijia1_cn_793209579_c9_s_2_curtain", state: "open（100%）", attrs: "当前位置 100%；支持开、关、停止、设定位置", note: "主页快捷控制独立操作纱帘" },
+];
+let onlyPending = true;
+const $ = (id) => document.getElementById(id);
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+const categories = [...new Set(items.map((item) => item.category))].sort();
+$("category").innerHTML += categories.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
+function render() {
+  const query = $("query").value.trim().toLowerCase();
+  const category = $("category").value;
+  const list = items.filter((item) => {
+    const text = Object.values(item).join(" ").toLowerCase();
+    return (!onlyPending || !item.entity) && (!category || item.category === category) && (!query || text.includes(query));
+  });
+  $("count").textContent = `显示 ${list.length} / ${items.length} 项`;
+  $("rows").innerHTML = list.map((item) => `<tr>
+    <td><div class="category">${escapeHtml(item.category)}</div></td>
+    <td><div class="name">${escapeHtml(item.name)}</div></td>
+    <td>${escapeHtml(item.type)}</td>
+    <td>${item.entity ? `<code>${escapeHtml(item.entity)}</code>` : `<span class="pending">待匹配</span>`}</td>
+    <td>${item.state ? escapeHtml(item.state) : `<span class="pending">待读取</span>`}</td>
+    <td>${escapeHtml(item.attrs)}</td>
+    <td>${escapeHtml(item.note || "—")}</td>
+  </tr>`).join("");
+}
+$("query").addEventListener("input", render);
+$("category").addEventListener("change", render);
+$("showPending").addEventListener("click", () => { onlyPending = true; render(); });
+$("showAll").addEventListener("click", () => { onlyPending = false; render(); });
+render();
+</script>
+</body>
+</html>

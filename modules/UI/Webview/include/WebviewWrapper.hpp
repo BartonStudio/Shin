@@ -4,6 +4,8 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <filesystem>
+#include <cstdint>
 #include <ISharedMemoryManager.hpp>
 
 #ifdef _WIN32
@@ -33,6 +35,9 @@ namespace UI {
         WebviewWrapper& operator=(const WebviewWrapper&) = delete;
 
         void SetDebug(bool enable);
+        // Enables remote debugging (CDP) on localhost:<port>. Must be called before Initialize().
+        // port <= 0 disables remote debugging.
+        void SetRemoteDebuggingPort(int port);
         void SetParentWindow(void* hwnd);
         
         void SetStartupURL(const std::string& url);
@@ -48,6 +53,21 @@ namespace UI {
 
         void SetTitle(const std::string& title);
         void SetSize(int width, int height, bool fixed = false);
+
+        struct BrowserExtensionResult {
+            bool success = false;
+            std::filesystem::path path;
+            std::string name;
+            std::int32_t hresult = 0;
+            std::string error;
+        };
+        using BrowserExtensionCallback = std::function<void(const BrowserExtensionResult&)>;
+
+        // Must be configured before Initialize because it changes WebView2 EnvironmentOptions.
+        void SetBrowserExtensionsEnabled(bool enable);
+        // Installs a local unpacked extension directory. The callback is invoked asynchronously.
+        bool AddBrowserExtension(const std::filesystem::path& extensionPath,
+                                 BrowserExtensionCallback callback = {});
 
         bool Initialize();
 

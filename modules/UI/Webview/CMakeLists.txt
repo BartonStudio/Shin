@@ -7,6 +7,9 @@ set_target_properties(UIWebview PROPERTIES FOLDER "Modules/UI")
 
 target_compile_definitions(UIWebview PRIVATE SHIN_UIWEBVIEW_EXPORTS)
 target_compile_features(UIWebview PUBLIC cxx_std_17)
+if(MSVC)
+    target_compile_options(UIWebview PRIVATE /utf-8)
+endif()
 
 target_include_directories(UIWebview PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

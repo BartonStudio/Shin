@@ -38,7 +38,7 @@
 ### 前后端通信协议
 - **JS → C++**：`window.shin.send(action, payload)` → `window.Shin.sendDataToCpp`（由 `__sendDataToCpp__` 绑定重命名而来）。见 `resources/web/ShinBridge.js`（全局单例 `window.shin`）。
 - **C++ → JS**：`SendJson`（`chrome.webview` message 事件，按 `data.action` 分发）；`SendString`；共享内存走 `sharedbufferreceived` 事件（零拷贝，用于视频流）。
-- 前端资源：`resources/web/`（`index.html`、`ShinBridge.js` 通信桥、`ShinDevMenu.js` 调试菜单、`HAMonitor.js`）。
+- 前端资源：`resources/web/`（`index.html`、`ShinBridge.js` 通信桥、`ShinDevMenu.js` 调试菜单，以及 `HomeAssistant/`、`QinLinApp/` 子应用）。
 
 ## System 模块（`modules/System`）
 - **Auth**（`LocalAuthenticator.hpp`）：Windows Hello 本地身份验证。`IsAvailable()` / `VerifyUser(AuthOptions)` → `AuthResult`。链接 `windowsapp`。导出宏 `SHIN_SYSTEM_API`（`SHIN_SYSTEM_EXPORTS`）。
